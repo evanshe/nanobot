@@ -2,7 +2,18 @@
 
 This plan implements the [TypeScript runtime design](./typescript-runtime-design.md) in `packages/runtime-ts/` in the existing repository. The Python implementation at `37c2af8ff` is the initial reference for observable behavior. Use the current Python implementation when an intervening change intentionally updates a supported contract. Each batch lists the existing tests to consult and the planned TypeScript tests to add.
 
-The dependency order is **0 → 1 → 2A and 2B in parallel → 3 → 5 → 6**. Batch 4 can start after batch 1 and run alongside storage, model, and agent work. Both batches 3 and 4 must pass before batch 5 exposes the pilot. Batch 5 is the first usable opt-in gateway. Batch 6 is the default-runtime decision.
+Implement in this order **0 → 1 → 2A → 2B → 3 → 4 → 5 → 6**. Batch 5 is the first usable opt-in gateway. Batch 6 is the default-runtime decision. Each batch has a completion gate and can contain several independently testable changes. Land each change with its focused verification and run the full batch checks before starting the next batch.
+
+| Batch | Suggested order within the batch |
+| --- | --- |
+| 0 | Shared config and wire fixtures → deterministic provider and stored-session fixtures → packaged gateway prototype |
+| 1 | Config loading and saving → typed events, delivery, admission and drain |
+| 2A | Driver and schema interoperability → history and ordered writes → checkpoints, cancellation and recovery |
+| 2B | Chat requests and text streaming → tool calls and usage → timeout, retry and cancellation |
+| 3 | Runner with deterministic tools → context assembly and loop → persisted turn and stop behavior |
+| 4 | Scoped operations and policy → actual tools backed by the verified operations |
+| 5 | Gateway identity and HTTP reads → WebSocket turns, mutations and media → installed WebUI and TUI pilot |
+| 6 | Provider and background feature parity → channels, SDK and plugins → ownership handoff and rollback → installed release checks |
 
 ## Batch 0 · Establish the behavioral baseline
 
