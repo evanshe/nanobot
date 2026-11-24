@@ -5,3 +5,5 @@ export * from './session/records.ts';
 export * from './session/history.ts';
 export * from './session/repository.ts';
 export * from './session/state.ts';
+export * from './session/location.ts';
+export { withNamespaceLock, atomicPrivateWrite } from './session/files.ts';

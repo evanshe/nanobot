@@ -12,10 +12,13 @@
   "scripts": {
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "typecheck:events": "tsc -p tsconfig.events.json"
+    "typecheck:events": "tsc -p tsconfig.events.json",
+    "build:native": "node-gyp rebuild --directory native",
+    "prepare": "npm run build:native"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "node-gyp": "12.1.0",
     "typescript": "5.9.3"
   },
   "dependencies": {
