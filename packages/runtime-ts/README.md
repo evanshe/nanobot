@@ -4,12 +4,12 @@ This private package is the independent Node 24 candidate runtime under developm
 
 ```bash
 cd packages/runtime-ts
-npm ci --ignore-scripts
+npm ci
 npm run typecheck
 npm test
 ```
 
-Tests use Node's built-in TS execution and test runner. Config parity tests import the normal `@nanobot/runtime` package entry and compare private real config files with the Python reference in a separate process; set `NANOBOT_TEST_PYTHON` to an installed project Python if the repository `.venv/bin/python` is unavailable. No runtime code imports or spawns Python. Only TypeScript and Node typings are development dependencies.
+Tests use Node's built-in TS execution and test runner. Config parity tests import the normal `@nanobot/runtime` package entry and compare private real config files with the Python reference in a separate process; set `NANOBOT_TEST_PYTHON` to an installed project Python if the repository `.venv/bin/python` is unavailable. No runtime code imports or spawns Python. TypeScript and Node typings are development dependencies; SQLite uses the pinned `sqlite3` N-API addon. Its install script obtains a platform prebuild or compiles locally, so development installs require that native setup. Release wheels must supply the verified addon and its runtime JS dependencies; the earlier built-ins-only wheel prototype does not establish addon distribution.
 
 ## Configuration
 
@@ -37,3 +37,16 @@ Node cancellation uses `AbortSignal`: handlers receive the publication's signal 
 Admission's synchronous checks, activity count, registered pending-work checks and pause/resume operations prevent an idle-check/intake gap on one event-loop thread. The `withActivity` and `withPausedIfIdle` helpers release their guards after errors and awaited cleanup. These are not cross-process profile ownership locks. The runtime publisher copies turn context and consumes per-session/run latency, runtime identity and ordered usage exactly once on completion. Canonical usage event types and the small reported/sum helpers support these publisher cases; provider normalization/retries remain in batch 2B.
 
 Regenerate/check the outbound fallback after command-catalog changes with `uv run --no-sync python -m scripts.export_ts_bus_contract [--check]`. The shared `test/fixtures/bus-events.json` scenario is consumed by both the Python bus reference test and the Node suite. The Node suite also reuses shared client-event compaction phases while keeping wire projection outside the bus.
+
+## SQLite driver and schema (batch 2A, first increment)
+
+`SqliteDriver.open(path)` selects `sqlite3@6.0.1` (SQLite 3.52.0 on this Linux x86_64 run). SQL executes asynchronously on native workers, not on the Node event loop. One connection serializes write transactions; each snapshot uses a distinct read-only connection with foreign keys and `synchronous=FULL`. Long reads use native `sqlite3_interrupt`, repeated briefly after abort until the native callback settles to cover cancellation before native execution begins. Reads close their own connection before reporting cancellation; write cancellation never interrupts a transaction and is reported only after accepted work settles. `close` rejects new admission and waits for owned operations.
+
+`initializeSchema` checks for future versions before changing WAL, then upgrades the released v1–v6 schema transactionally using `schema.json`, exported from the actual Python migrations. It preserves existing import markers and does not mark a fresh database imported: JSONL import, session location ownership, domain history mutations and recovery remain for the following 2A increments. This is a low-level driver boundary, not a usable session owner yet. Its transaction callbacks must use the supplied transaction/snapshot operations and must not recursively enter the same writer.
+
+Focused tests execute a billion-step recursive SELECT in a child with a hard timeout, observe native `SQLITE_INTERRUPT` (about 31 ms in the initial run), and check HTTP responsiveness while another connection holds a write lock (about 22 ms, with event-loop timers continuing). An aborted accepted write commits after lock release before rejecting its caller. Other checks cover JSON/WAL/transactions, private file mode, foreign keys, read-only enforcement and Python v1 fixture → TS upgrade/write → Python reopen/write → TS reread, preserving provider state, checkpoint, pending inputs, timestamps and generation. Tests use only temporary database paths. Native wheel bundling and other OS/CPU combinations are not verified by this driver increment.
+
+```bash
+uv run --no-sync python -m scripts.export_ts_session_schema --check
+node --test packages/runtime-ts/test/sqlite-driver.test.ts
+```

@@ -1,0 +1,48 @@
+[
+  {
+    "version": 1,
+    "statements": [
+      "CREATE TABLE IF NOT EXISTS storage_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS sessions (\n            key TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,\n            metadata TEXT NOT NULL, provider_state TEXT, last_archived INTEGER NOT NULL,\n            revision INTEGER NOT NULL, generation TEXT NOT NULL,\n            title TEXT NOT NULL, preview TEXT NOT NULL, visible_updated_at TEXT\n        )",
+      "CREATE TABLE IF NOT EXISTS messages (\n            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,\n            position INTEGER NOT NULL, record TEXT NOT NULL,\n            PRIMARY KEY (session_key, position)\n        )",
+      "CREATE TABLE IF NOT EXISTS checkpoints (\n            session_key TEXT PRIMARY KEY REFERENCES sessions(key) ON DELETE CASCADE,\n            record TEXT NOT NULL\n        )",
+      "CREATE TABLE IF NOT EXISTS pending_inputs (\n            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,\n            kind TEXT NOT NULL, position INTEGER NOT NULL, record TEXT NOT NULL,\n            PRIMARY KEY (session_key, kind, position)\n        )",
+      "CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updated_at DESC)"
+    ]
+  },
+  {
+    "version": 2,
+    "statements": [
+      "CREATE TABLE history_heads (\n            session_key TEXT PRIMARY KEY REFERENCES sessions(key) ON DELETE CASCADE,\n            revision INTEGER NOT NULL DEFAULT 0,\n            updated_at_ms INTEGER NOT NULL DEFAULT 0,\n            preview TEXT NOT NULL DEFAULT '', user_preview TEXT NOT NULL DEFAULT ''\n        )",
+      "CREATE TABLE history_turns (\n            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,\n            ordinal INTEGER NOT NULL, record_count INTEGER NOT NULL,\n            byte_count INTEGER NOT NULL, user_count INTEGER NOT NULL,\n            completed INTEGER NOT NULL,\n            PRIMARY KEY (session_key, ordinal)\n        )",
+      "CREATE TABLE history_entries (\n            session_key TEXT NOT NULL, turn_ordinal INTEGER NOT NULL,\n            position INTEGER NOT NULL, kind TEXT NOT NULL, record TEXT NOT NULL,\n            PRIMARY KEY (session_key, turn_ordinal, position),\n            FOREIGN KEY (session_key, turn_ordinal)\n                REFERENCES history_turns(session_key, ordinal) ON DELETE CASCADE\n        )"
+    ]
+  },
+  {
+    "version": 3,
+    "statements": [
+      "CREATE TABLE session_archives (\n        key TEXT PRIMARY KEY, archived_at TEXT NOT NULL\n    )"
+    ]
+  },
+  {
+    "version": 4,
+    "statements": [
+      "CREATE TABLE session_archives_v4 (\n        key TEXT PRIMARY KEY REFERENCES sessions(key)\n            ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,\n        archived_at TEXT NOT NULL\n    )",
+      "INSERT INTO session_archives_v4 (key, archived_at)\n        SELECT archives.key, archives.archived_at FROM session_archives AS archives\n        JOIN sessions ON sessions.key = archives.key",
+      "DROP TABLE session_archives",
+      "ALTER TABLE session_archives_v4 RENAME TO session_archives"
+    ]
+  },
+  {
+    "version": 5,
+    "statements": [
+      "CREATE UNIQUE INDEX history_input_identity ON history_entries (\n        session_key, json_extract(record, '$.content.input_id')\n    ) WHERE kind='input'"
+    ]
+  },
+  {
+    "version": 6,
+    "statements": [
+      "CREATE INDEX sessions_subagent_origin_turn_id ON sessions (\n        json_extract(metadata, '$.parent_session_key'), json_extract(metadata, '$.subagent_task.origin_turn_id')\n    ) WHERE json_extract(metadata, '$.session_type')='subagent' AND json_type(metadata, '$.parent_session_key')='text' AND json_type(metadata, '$.subagent_task.origin_turn_id')='text'"
+    ]
+  }
+]
