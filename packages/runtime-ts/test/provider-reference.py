@@ -1,12 +1,16 @@
 """Exercise the public Python Chat provider against a caller-owned loopback stub."""
 import asyncio
 import json
+import os
 import sys
 from dataclasses import asdict
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 request = json.load(sys.stdin)
+if 'timeout_s' in request:
+    os.environ['NANOBOT_STREAM_IDLE_TIMEOUT_S'] = str(request['timeout_s'])
+    os.environ['NANOBOT_OPENAI_COMPAT_TIMEOUT_S'] = str(request['timeout_s'])
 
 
 async def main():
@@ -19,6 +23,8 @@ async def main():
 
     async def on_content(value):
         content.append(value)
+        if request.get('fail_callback'):
+            raise RuntimeError('callback failed')
 
     async def on_thinking(value):
         thinking.append(value)
@@ -35,12 +41,18 @@ async def main():
             )
         else:
             result = await provider.chat(**kwargs)
-        print(json.dumps({'response': {
+        output = {'response': {
             'content': result.content, 'reasoning_content': result.reasoning_content,
             'finish_reason': result.finish_reason,
             'tool_calls': [asdict(call) for call in result.tool_calls],
             'usage': result.usage.to_dict() if result.usage else None,
-        }, 'content': content, 'thinking': thinking, 'tools': tools}))
+        }, 'content': content, 'thinking': thinking, 'tools': tools}
+        if result.finish_reason == 'error':
+            for name in ('error_status_code', 'error_kind', 'error_type', 'error_code',
+                         'error_retry_after_s', 'error_should_retry', 'retry_after'):
+                output['response'][name] = getattr(result, name)
+            output['transient'] = provider.is_transient_response(result)
+        print(json.dumps(output))
     finally:
         await provider.aclose()
 

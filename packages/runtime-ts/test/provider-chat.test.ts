@@ -7,10 +7,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { OpenAIChatProvider } from '@nanobot/runtime';
-import type { ChatRequest } from '@nanobot/runtime';
+import { OpenAIChatProvider, isTransientChatResponse, resolveChatIdleTimeoutMs } from '@nanobot/runtime';
+import type { ChatRequest, ChatResponse } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-export async function pythonReference(input: object): Promise<{ response: object; content: string[]; thinking: string[]; tools: object[] }> {
+export async function pythonReference(input: object): Promise<{ response: ChatResponse; transient?: boolean; content: string[]; thinking: string[]; tools: object[] }> {
   const child = spawn(process.env.NANOBOT_TEST_PYTHON ?? join(root, '.venv/bin/python'), [fileURLToPath(new URL('./provider-reference.py', import.meta.url))], { cwd: root, env: { ...process.env, PYTHONPATH: root } });
   let stdout = '', stderr = ''; child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
   child.stdin.end(JSON.stringify(input)); const [code] = await once(child, 'close'); assert.equal(code, 0, stderr); return JSON.parse(stdout);
@@ -110,4 +110,104 @@ test('legacy function_call fragments preserve empty arguments and emit matching 
     const response = await new OpenAIChatProvider({ apiBase: base }).chatStream(input, { onToolCallDelta: value => { tools.push(value); } });
     assert.deepEqual(tools, reference.tools); assert.equal(response.tool_calls[0].name, 'legacy'); assert.deepEqual(response.tool_calls[0].arguments, {}); assert.match(response.tool_calls[0].id, /^[A-Za-z0-9]{9}$/);
   }, response => { response.setHeader('content-type', 'text/event-stream'); response.end([chunk({ function_call: { name: 'legacy', arguments: ' ' } }), chunk({}, 'function_call')].map(value => `data: ${JSON.stringify(value)}\n\n`).join('')); });
+});
+function errorMetadata(response: ChatResponse) {
+  return Object.fromEntries(['error_status_code', 'error_kind', 'error_type', 'error_code', 'error_retry_after_s', 'error_should_retry', 'retry_after'].map(key => [key, response[key as keyof ChatResponse]]));
+}
+const synthetic: ChatRequest = { messages: [{ role: 'user', content: 'synthetic' }] };
+test('HTTP retry metadata and classification match Python without hidden retries', { timeout: 30_000 }, async () => {
+  for (const [status, code, headers] of [[429, 'rate_limit_exceeded', { 'retry-after-ms': '250' }], [429, 'insufficient_quota', {}], [503, 'unavailable', { 'x-should-retry': 'false' }], [401, 'invalid_api_key', {}], [400, 'custom', { 'x-should-retry': 'true', 'retry-after': '2' }]] as const) {
+    await stub(async (base, requests) => {
+      const reference = await pythonReference({ base, request: synthetic });
+      const result = await new OpenAIChatProvider({ apiBase: base }).chat(synthetic);
+      assert.equal(result.finish_reason, 'error'); assert.deepEqual(errorMetadata(result), errorMetadata(reference.response)); assert.equal(isTransientChatResponse(result), reference.transient); assert.equal(requests.length, 2);
+    }, response => { response.writeHead(status, { 'content-type': 'application/json', ...headers }); response.end(JSON.stringify({ error: { message: 'synthetic failure', type: 'test', code } })); });
+  }
+});
+test('idle deadline renews on parsed reasoning/usage events and permits total duration above deadline', { timeout: 10_000 }, async () => {
+  await stub(async base => {
+    const reference = await pythonReference({ base, request: synthetic, stream: true, timeout_s: 0.3 });
+    const result = await new OpenAIChatProvider({ apiBase: base, idleTimeoutMs: 300 }).chatStream(synthetic);
+    assert.deepEqual(result, reference.response); assert.equal(result.content, 'done');
+  }, async response => {
+    response.setHeader('content-type', 'text/event-stream'); response.flushHeaders();
+    for (const value of [chunk({ reasoning_content: 'a' }), { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0 } }, chunk({ reasoning_content: 'b' }), chunk({ content: 'done' }, 'stop')]) {
+      await new Promise(resolve => setTimeout(resolve, 100)); if (response.destroyed) return; response.write(`data: ${JSON.stringify(value)}\n\n`);
+    } response.end('data: [DONE]\n\n');
+  });
+});
+test('silent headers/body and comment-only streams time out and close the loopback response', { timeout: 15_000 }, async () => {
+  for (const mode of ['headers', 'body', 'comments', 'chat']) {
+    let closes = 0;
+    await stub(async base => {
+      const stream = mode !== 'chat', reference = await pythonReference({ base, request: synthetic, stream, timeout_s: 0.15 });
+      const provider = new OpenAIChatProvider({ apiBase: base, idleTimeoutMs: 150, requestTimeoutMs: 150 });
+      const result = stream ? await provider.chatStream(synthetic) : await provider.chat(synthetic);
+      assert.equal(result.error_kind, 'timeout'); assert.equal(reference.response.error_kind, 'timeout');
+      assert.equal(isTransientChatResponse(result), reference.transient);
+      await provider.close(); const deadline = Date.now() + 1500; while (closes < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5)); assert.equal(closes, 2);
+    }, response => {
+      response.on('close', () => { closes++; });
+      if (mode === 'headers') return;
+      response.setHeader('content-type', mode === 'chat' ? 'application/json' : 'text/event-stream'); response.flushHeaders();
+      if (mode === 'comments') { const timer = setInterval(() => response.write(': ping\n\n'), 20); response.on('close', () => clearInterval(timer)); }
+    });
+  }
+});
+test('truncated streams and SSE errors take priority over deferred usage parse errors', { timeout: 15_000 }, async () => {
+  for (const terminal of ['eof', 'finish', 'sse-error', 'disconnect-after-finish']) {
+    await stub(async base => {
+      const reference = await pythonReference({ base, request: synthetic, stream: true }), content: string[] = [];
+      const response = await new OpenAIChatProvider({ apiBase: base }).chatStream(synthetic, { onContentDelta: value => { content.push(value); } });
+      assert.equal(response.finish_reason, 'error'); assert.deepEqual(content, reference.content); assert.equal(response.error_kind, reference.response.error_kind); assert.equal(isTransientChatResponse(response), reference.transient);
+      if (terminal === 'sse-error') assert.match(response.content!, /provider stream error/);
+    }, async response => {
+      response.setHeader('content-type', 'text/event-stream');
+      response.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: -1, completion_tokens: 0 } })}\n\n`);
+      response.write(`data: ${JSON.stringify(chunk({ content: 'live despite parse error' }))}\n\n`);
+      if (terminal === 'finish' || terminal === 'disconnect-after-finish') response.write(`data: ${JSON.stringify(chunk({}, 'stop'))}\n\n`);
+      if (terminal === 'sse-error') response.write('data: {"error":{"message":"provider stream error"}}\n\n');
+      if (terminal === 'disconnect-after-finish') { await new Promise(resolve => setTimeout(resolve, 20)); response.destroy(); } else response.end();
+    });
+  }
+});
+test('callback errors are non-retryable and close the stream; slow callbacks do not count as idle', { timeout: 10_000 }, async () => {
+  let closes = 0;
+  await stub(async base => {
+    const reference = await pythonReference({ base, request: synthetic, stream: true, fail_callback: true });
+    const provider = new OpenAIChatProvider({ apiBase: base, idleTimeoutMs: 100 });
+    const failure = await provider.chatStream(synthetic, { onContentDelta: () => { throw new Error('callback failed'); } });
+    assert.equal(failure.error_kind, reference.response.error_kind); assert.equal(failure.error_should_retry, false); assert.equal(isTransientChatResponse(failure), false);
+    const success = await provider.chatStream(synthetic, { onContentDelta: async () => { await new Promise(resolve => setTimeout(resolve, 200)); } }); assert.equal(success.content, 'text');
+    await provider.close(); assert.ok(closes >= 2);
+  }, response => { response.on('close', () => { closes++; }); response.setHeader('content-type', 'text/event-stream'); response.end(`data: ${JSON.stringify(chunk({ content: 'text' }))}\n\ndata: ${JSON.stringify(chunk({}, 'stop'))}\n\n`); });
+});
+test('AbortSignal interrupts blocked reads and callbacks, closes sockets and retains callback ownership for drain', { timeout: 10_000 }, async () => {
+  for (const mode of ['read', 'callback']) {
+    let closed = false, started!: () => void; const reached = new Promise<void>(resolve => { started = resolve; });
+    await stub(async base => {
+      const controller = new AbortController(), provider = new OpenAIChatProvider({ apiBase: base });
+      let release!: () => void; const retained = new Promise<void>(resolve => { release = resolve; });
+      const pending = provider.chatStream(synthetic, { onContentDelta: async (_text, signal) => { started(); assert.equal(signal.aborted, false); await retained; } }, controller.signal);
+      await reached; controller.abort(new DOMException('synthetic cancellation', 'AbortError')); await assert.rejects(pending, /synthetic cancellation/);
+      let drained = false; const closing = provider.close().then(() => { drained = true; }); await new Promise(resolve => setImmediate(resolve));
+      if (mode === 'callback') assert.equal(drained, false); release(); await closing;
+      const deadline = Date.now() + 1500; while (!closed && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5)); assert.equal(closed, true);
+      await assert.rejects(provider.chat(synthetic), /closed/);
+    }, response => { response.on('close', () => { closed = true; }); response.setHeader('content-type', 'text/event-stream'); response.flushHeaders(); if (mode === 'callback') response.write(`data: ${JSON.stringify(chunk({ content: 'wait' }))}\n\n`); else started(); });
+  }
+});
+test('idle timeout resolver accepts positive values and clamps environmental deadlines', () => {
+  assert.equal(resolveChatIdleTimeoutMs(''), 90_000); assert.equal(resolveChatIdleTimeoutMs('-1'), 90_000); assert.equal(resolveChatIdleTimeoutMs('invalid'), 90_000);
+  assert.equal(resolveChatIdleTimeoutMs('0.3'), 300); assert.equal(resolveChatIdleTimeoutMs('99999'), 3_600_000);
+});
+test('empty completion errors and retry text durations match the Python public boundary', { timeout: 10_000 }, async () => {
+  await stub(async base => {
+    const reference = await pythonReference({ base, request: synthetic }), response = await new OpenAIChatProvider({ apiBase: base }).chat(synthetic);
+    assert.equal(response.content, reference.response.content); assert.deepEqual(errorMetadata(response), errorMetadata(reference.response));
+  }, response => { response.setHeader('content-type', 'application/json'); response.end('{"choices":[]}'); });
+  await stub(async base => {
+    const reference = await pythonReference({ base, request: synthetic }), response = await new OpenAIChatProvider({ apiBase: base }).chat(synthetic);
+    assert.equal(response.retry_after, reference.response.retry_after); assert.equal(response.retry_after, 90);
+  }, response => { response.writeHead(429, { 'content-type': 'application/json' }); response.end('{"error":{"message":"try again in 1m30s","code":"rate_limit_exceeded"}}'); });
 });
