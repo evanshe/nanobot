@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { InboundMessage, EventSink, MessageBus, RuntimeEventPublisher } from '../bus/index.ts';
+import { InboundMessage, EventSink, MessageBus, RuntimeEventPublisher, RuntimeBusyError } from '../bus/index.ts';
 import type { AgentEvent, EventMap, OutboundMessage, Metadata, LLMUsage } from '../bus/index.ts';
 import { object } from '../config/decoder.ts';
 import type { ConfigObject } from '../config/decoder.ts';
 import { newSession, SessionConflictError, localTimestamp } from '../session/records.ts';
 import type { SessionRecord, SessionPolicy } from '../session/records.ts';
 import { SessionState } from '../session/state.ts';
-import { cloneRecoveryInbound, restoreRuntimeCheckpoint, restorePendingInterruption } from '../session/recovery.ts';
+import { cloneRecoveryInbound, restoreRuntimeCheckpoint, restorePendingInterruption, discardRuntimeCheckpoint, runtimeCheckpointIsWellFormed, pendingFollowups } from '../session/recovery.ts';
 import { ContextBuilder } from './context.ts';
 import type { ContextOptions, RuntimeContextBlock } from './context.ts';
 import { AgentRunner } from './runner.ts';
@@ -42,27 +42,81 @@ function routable(event: AgentEvent, message: InboundMessage, streaming: boolean
   if (['model_request', 'recovery_state', 'response_source', 'retry_status'].includes(event.kind)) return message.channel === 'websocket';
   return ['progress', 'file_edit', 'context_compaction', 'retry_wait'].includes(event.kind);
 }
+export class AgentLoopCancellation extends Error {
+  readonly preserveCheckpoint: boolean;
+  constructor(message: string, preserveCheckpoint: boolean) { super(message); this.name = 'AbortError'; this.preserveCheckpoint = preserveCheckpoint; }
+}
+export type AgentRecoveryCandidate = { key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
-  readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>(); #closed = false;
+  readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
+  readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
   constructor(options: AgentLoopOptions) { this.#options = { ...options }; this.#publisher = new RuntimeEventPublisher(options.bus); }
-  #serial<T>(key: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (this.#closed) return Promise.reject(new Error('Agent loop is closed')); signal?.throwIfAborted();
-    const release = this.#options.bus.admission.activity(), previous = this.#tails.get(key) ?? Promise.resolve();
-    const task = previous.catch(() => {}).then(() => { signal?.throwIfAborted(); return operation(); }).finally(() => {
-      release(); this.#pending.delete(task); if (this.#tails.get(key) === task) this.#tails.delete(key);
+  #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (this.#closed) return Promise.reject(new Error('Agent loop is closed'));
+    if (this.#controlling.has(key)) return Promise.reject(new RuntimeBusyError('Session control is active'));
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    const release = this.#options.bus.admission.activity(), previous = this.#tails.get(key) ?? Promise.resolve(), controller = new AbortController();
+    const abort = () => controller.abort(signal!.reason); signal?.addEventListener('abort', abort, { once: true });
+    const jobs = this.#jobs.get(key) ?? new Set<{ controller: AbortController; task: Promise<unknown> }>(); this.#jobs.set(key, jobs);
+    const task = previous.catch(() => {}).then(() => { controller.signal.throwIfAborted(); return operation(controller); }).finally(() => {
+      signal?.removeEventListener('abort', abort); release(); this.#pending.delete(task); jobs.delete(job); if (!jobs.size) this.#jobs.delete(key); if (this.#tails.get(key) === task) this.#tails.delete(key);
     });
-    this.#tails.set(key, task); this.#pending.add(task); void task.catch(() => {}); return task;
+    const job = { controller, task }; jobs.add(job); this.#tails.set(key, task); this.#pending.add(task); void task.catch(() => {}); return task;
   }
   async drain(): Promise<void> { while (this.#pending.size) await Promise.allSettled([...this.#pending]); }
-  async close(): Promise<void> { this.#closed = true; await this.drain(); }
+  async close(options: { cancel?: boolean; preserveInflight?: boolean } = {}): Promise<void> {
+    this.#closed = true;
+    if (options.cancel !== false) for (const jobs of this.#jobs.values()) for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Agent loop shutdown', options.preserveInflight !== false));
+    await this.drain();
+  }
+  async stopSession(key: string): Promise<number> {
+    if (this.#closed) throw new Error('Agent loop is closed');
+    if (this.#controlling.has(key)) throw new RuntimeBusyError('Session control is active');
+    const release = this.#options.bus.admission.activity(); this.#controlling.add(key);
+    try {
+      const jobs = [...this.#jobs.get(key) ?? []]; for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Session stopped', false));
+      const before = await this.#options.state.read(key), ids = before ? pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string') : [];
+      await Promise.allSettled(jobs.map(job => job.task));
+      const current = await this.#options.state.readHeader(key);
+      if (ids.length && current && current.generation === before?.generation) await this.#options.state.acknowledgeFollowups(key, ids);
+      return jobs.length;
+    } finally { this.#controlling.delete(key); release(); }
+  }
+  restoreSession(key: string, options: { expectedGeneration?: string; signal?: AbortSignal } = {}): Promise<boolean> {
+    return this.#serial(key, async controller => {
+      const session = await this.#options.state.read(key); controller.signal.throwIfAborted(); if (!session) return false;
+      if (options.expectedGeneration !== undefined && session.generation !== options.expectedGeneration) throw new SessionConflictError('Recovery belongs to a replaced session');
+      const checkpoint = session.metadata.runtime_checkpoint;
+      let changed = false;
+      if (object(checkpoint) && !runtimeCheckpointIsWellFormed(checkpoint)) changed = discardRuntimeCheckpoint(session);
+      else changed = restoreRuntimeCheckpoint(session);
+      changed = restorePendingInterruption(session) || changed;
+      if (changed) await this.#options.state.restoreInterruption(session);
+      return changed;
+    }, options.signal);
+  }
+  async scanRecovery(prefix = ''): Promise<AgentRecoveryCandidate[]> {
+    if (this.#closed) throw new Error('Agent loop is closed');
+    const candidates = await this.#options.state.recoveryCandidates(prefix), result: AgentRecoveryCandidate[] = [];
+    for (const [key, unfinished] of candidates) {
+      if (this.#tails.has(key)) continue;
+      const candidate = await this.#serial(key, async () => {
+        const session = await this.#options.state.read(key); if (!session) return null;
+        const checkpoint = session.metadata.runtime_checkpoint, pending = Boolean(session.metadata.pending_user_turn);
+        if (!object(checkpoint) && !pending && !unfinished) return null;
+        return { key, generation: session.generation, phase: object(checkpoint) && typeof checkpoint.phase === 'string' ? checkpoint.phase : null, checkpointValid: object(checkpoint) && runtimeCheckpointIsWellFormed(checkpoint), pendingInput: pending, pendingFollowups: pendingFollowups(session).length, unfinishedDisplayTurn: unfinished, requiresConfirmation: !(object(checkpoint) && checkpoint.phase === 'final_response' && runtimeCheckpointIsWellFormed(checkpoint)) };
+      }); if (candidate) result.push(candidate);
+    }
+    return result;
+  }
   processDirect(content: string, options: DirectTurnOptions & { sessionKey?: string; channel?: string; chatId?: string; senderId?: string; media?: string[]; metadata?: Metadata } = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     if (options.channel === 'system') return Promise.reject(new Error("channel 'system' is reserved for internal messages"));
     return this.processMessage(new InboundMessage({ channel: options.channel ?? 'cli', chatId: options.chatId ?? 'direct', senderId: options.senderId ?? 'user', content, media: options.media, metadata: options.metadata, sessionKeyOverride: options.sessionKey ?? 'cli:direct' }), { ...options, publishCompletion: options.publishCompletion ?? false, publishAcceptance: options.publishAcceptance ?? false });
   }
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
-    return this.#serial(key, () => this.#turn(message, captured), options.signal);
+    return this.#serial(key, controller => this.#turn(message, { ...captured, signal: controller.signal }), options.signal);
   }
   async #turn(message: InboundMessage, options: DirectTurnOptions): Promise<OutboundMessage<AgentRuntime> | null> {
     const { state, bus, context, dataDirectory } = this.#options, key = message.sessionKey, turnId = randomUUID().replaceAll('-', ''), started = performance.now(), signal = options.signal ?? new AbortController().signal;
@@ -81,7 +135,7 @@ export class AgentLoop {
     try {
       signal.throwIfAborted();
       if (restoreRuntimeCheckpoint(draft) || restorePendingInterruption(draft)) await state.restoreInterruption(draft);
-      const runtime = Object.freeze({ ...await this.#options.runtimeForSession(structuredClone(draft), message) });
+      const runtime = Object.freeze({ ...await this.#options.runtimeForSession(structuredClone(draft), message) }); signal.throwIfAborted();
       const baseTools = this.#options.tools, disabled = new Set(draft.policy.disabledTools);
       const tools: AgentTools = { definitions: structuredClone(baseTools.definitions.filter(item => object(item.function) && !disabled.has(String(item.function.name)))), validate: baseTools.validate.bind(baseTools), execute: baseTools.execute.bind(baseTools), concurrencySafe: baseTools.concurrencySafe?.bind(baseTools) };
       const project = options.projectWorkspace ?? await this.#options.resolveProject?.(message, structuredClone(draft)) ?? context.workspace;
@@ -89,6 +143,7 @@ export class AgentLoop {
       const history = await sessionModelHistory(draft, { dataDirectory, signal }), previousCount = draft.messages.length;
       const blocks = await this.#options.runtimeContext?.(message, structuredClone(draft)) ?? [];
       const transcript = await context.buildTranscript({ history, currentMessage: message.content, currentRole: message.isUserInput ? 'user' : 'system', media: message.media, runtimeContextBlocks: blocks, inputMetadata: inputMetadata(message), sessionSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? { text: draft.metadata._last_summary.text, last_active: typeof draft.metadata._last_summary.last_active === 'string' ? draft.metadata._last_summary.last_active : draft.updatedAt } : null }, contextOptions);
+      signal.throwIfAborted();
       const current = transcript.at(-1)!, early = Boolean(message.content.trim() || message.media.length || blocks.length);
       if (early) { await persistAgentMessages(draft, [current], { dataDirectory }); draft.metadata.pending_user_turn = true; }
       draft.metadata.request_origin = { message_id: typeof message.metadata.message_id === 'string' ? message.metadata.message_id : null, turn_id: turnId };
@@ -119,6 +174,13 @@ export class AgentLoop {
       if (!ephemeral) await this.#publisher.sessionTurnPersisted(message, key, turnId);
       if (options.publishCompletion !== false) await this.#publisher.turnCompleted({ channel: message.channel, chatId: message.chatId, sessionKey: key, metadata: message.metadata, runId: turnId, outcome: result.stop_reason === 'error' ? 'failed' : 'completed', failureKind: result.stop_reason === 'error' ? 'model' : null });
       return { channel: message.channel, chatId: message.chatId, content: result.final_content ?? '', metadata: { ...message.metadata, latency_ms: latency } };
+    } catch (error) {
+      if (signal.aborted && signal.reason instanceof AgentLoopCancellation && !signal.reason.preserveCheckpoint) {
+        const current = await state.read(draft.key);
+        if (current && current.generation === draft.generation) { restoreRuntimeCheckpoint(current); await state.finishTurn(current); }
+      }
+      if (options.publishCompletion !== false) await this.#publisher.turnCompleted({ channel: message.channel, chatId: message.chatId, sessionKey: key, metadata: message.metadata, runId: turnId, outcome: signal.aborted ? 'cancelled' : 'failed', failureKind: signal.aborted ? null : 'internal' });
+      throw error;
     } finally { this.#publisher.clearTurn(key, turnId); await this.#publisher.runStatusChanged(message, key, 'idle'); if (temporaryKey) await state.discard(temporaryKey); }
   }
 }

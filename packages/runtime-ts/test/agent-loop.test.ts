@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { AgentLoop, ContextBuilder, MessageBus, RuntimeBusyError, openSessionStore } from '@nanobot/runtime';
+import { AgentLoop, ContextBuilder, MessageBus, RuntimeBusyError, openSessionStore, InboundMessage } from '@nanobot/runtime';
 import type { AgentRuntime, AgentModel, AgentTools, ChatRequest, ChatResponse, ChatToolCall, ConfigObject } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const definition: ConfigObject = { type: 'function', function: { name: 'echo', description: 'Synthetic output.', parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } } };
@@ -71,5 +71,53 @@ test('a reset during a model request rejects its late checkpoint before any tool
   try {
     const pending = runtime.loop.processDirect('old generation'); await reached; const old = (await runtime.store.state.get('cli:direct')).generation; await runtime.store.state.reset('cli:direct'); release(); await assert.rejects(pending, /replaced session/);
     const fresh = await runtime.store.state.get('cli:direct'); assert.notEqual(fresh.generation, old); assert.deepEqual(fresh.messages, []); assert.equal(executed, 0);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+async function seedCheckpoint(runtime: Awaited<ReturnType<typeof create>>, key = 'cli:recover') {
+  const session = await runtime.store.state.get(key); session.messages.push({ role: 'user', content: 'original request', input_id: 'user:original' }); session.metadata.pending_user_turn = true;
+  await runtime.store.state.prepareInput(session);
+  await runtime.store.state.checkpointView(session, { phase: 'tools_completed', iteration: 0, model: 'synthetic-model', assistant_message: { role: 'assistant', content: '', tool_calls: [{ id: 'saved', type: 'function', function: { name: 'echo', arguments: '{}' } }] }, completed_tool_results: [{ role: 'tool', tool_call_id: 'saved', name: 'echo', content: 'actual saved result' }], pending_tool_calls: [], preceding_messages: [], provider_state_checkpoint_version: 'v1' });
+  return session.generation;
+}
+test('recovery scan is read-only and concurrent same-session restores materialize one checkpoint', async () => isolated(async (directory, agent, builtin) => {
+  let models = 0; const runtime = await create(directory, agent, builtin, { chatStream: async () => { models++; return frame('never'); } });
+  try {
+    const generation = await seedCheckpoint(runtime), before = await runtime.store.state.read('cli:recover');
+    const candidates = await runtime.loop.scanRecovery('cli:'); assert.equal(candidates.length, 1); assert.equal(candidates[0].checkpointValid, true); assert.equal(candidates[0].requiresConfirmation, true);
+    assert.deepEqual(await runtime.store.state.read('cli:recover'), before);
+    assert.deepEqual(await Promise.all([runtime.loop.restoreSession('cli:recover'), runtime.loop.restoreSession('cli:recover')]), [true, false]);
+    const saved = await runtime.store.state.get('cli:recover'); assert.deepEqual(saved.messages.map(row => row.role), ['user', 'assistant', 'tool']); assert.equal(saved.messages[2].content, 'actual saved result'); assert.equal(models, 0);
+    await runtime.store.state.reset(saved.key); await assert.rejects(runtime.loop.restoreSession(saved.key, { expectedGeneration: generation }), /replaced session/);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+for (const shutdown of [false, true]) test(`explicit stop and shutdown retain distinct checkpoint ownership: shutdown=${shutdown}`, async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, requests = 0; const reached = new Promise<void>(resolve => { entered = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (_request, _callbacks, signal) => {
+    if (++requests === 1) return frame(null, [toolCall]); entered(); await new Promise<never>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })); throw new Error('unreachable');
+  } });
+  try {
+    const pending = runtime.loop.processDirect('request'); await reached;
+    const draft = await runtime.store.state.get('cli:direct');
+    await runtime.store.state.queueFollowup(draft.key, new InboundMessage({ channel: 'websocket', chatId: 'direct', senderId: 'user', content: 'accepted follow-up', sessionKeyOverride: draft.key, sessionGeneration: draft.generation }));
+    if (shutdown) await runtime.loop.close(); else assert.equal(await runtime.loop.stopSession(draft.key), 1);
+    await assert.rejects(pending, shutdown ? /shutdown/ : /stopped/);
+    const saved = await runtime.store.state.get(draft.key); assert.equal(Boolean(saved.metadata.pending_user_turn), shutdown); assert.equal(Boolean(saved.metadata.runtime_checkpoint), shutdown);
+    assert.equal(Boolean(saved.metadata.pending_user_followups), shutdown);
+    if (!shutdown) assert.equal(saved.messages.find(row => row.role === 'tool')?.content, 'synthetic output');
+    assert.equal(requests, 2);
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('stop retains activity until a cancellation-suppressing model settles before releasing the next draft', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => { entered(); await blocked; return frame('late answer must not commit'); } });
+  try {
+    const pending = runtime.loop.processDirect('request'); await reached;
+    let stopped = false; const stopping = runtime.loop.stopSession('cli:direct').then(() => { stopped = true; }); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(stopped, false); assert.throws(() => runtime.bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+    await assert.rejects(runtime.loop.restoreSession('cli:direct'), /control is active/);
+    release(); await stopping; await assert.rejects(pending, /stopped/);
+    assert.deepEqual((await runtime.store.state.get('cli:direct')).messages.map(row => row.content), ['request']);
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
 }));
