@@ -59,6 +59,11 @@ def test_ordered_upgrades_preserve_records_and_do_not_repeat_import(tmp_path, mo
         db.executescript(schema.read_text(encoding="utf-8"))
     store.save(original)
     assert _database_snapshot(store.path)[0] == 1
+    before_upgrade = store.load(original.key)
+    assert before_upgrade is not None
+    assert before_upgrade.created_at == original.created_at
+    assert before_upgrade.updated_at == original.updated_at
+    assert before_upgrade.generation == original.generation
 
     def add_archived(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
@@ -78,6 +83,9 @@ def test_ordered_upgrades_preserve_records_and_do_not_repeat_import(tmp_path, mo
     assert loaded.messages == original.messages
     assert loaded.metadata == original.metadata
     assert loaded.provider_state == original.provider_state
+    assert loaded.created_at == before_upgrade.created_at
+    assert loaded.updated_at == before_upgrade.updated_at
+    assert loaded.generation == before_upgrade.generation
     upgraded.save(loaded)
 
     reopened = SqliteSessionStore(tmp_path)
@@ -87,6 +95,9 @@ def test_ordered_upgrades_preserve_records_and_do_not_repeat_import(tmp_path, mo
     assert roundtrip.messages == original.messages
     assert roundtrip.metadata == original.metadata
     assert roundtrip.provider_state == original.provider_state
+    assert roundtrip.created_at == before_upgrade.created_at
+    assert roundtrip.updated_at == before_upgrade.updated_at
+    assert roundtrip.generation == before_upgrade.generation
     with closing(sqlite3.connect(store.path)) as db:
         assert db.execute("SELECT archived FROM sessions").fetchall() == [(0,)]
         assert db.execute("SELECT name FROM sqlite_master WHERE name='sessions_archived'").fetchone()

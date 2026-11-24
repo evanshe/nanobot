@@ -1,6 +1,6 @@
 """Build/install/stop an isolated Linux x64 prototype wheel, never a release artifact.
 
-Run with --node /absolute/node --node-license /absolute/LICENSE.
+Run with --node-archive /absolute/node-v24.22.3-linux-x64.tar.xz.
 All generated artifacts (including the copied Node binary) are temporary.
 """
 from __future__ import annotations
@@ -11,11 +11,14 @@ import csv
 import hashlib
 import io
 import json
+import os
 import platform
 import selectors
 import signal
 import subprocess
+import tarfile
 import tempfile
+import time
 import urllib.request
 import venv
 import zipfile
@@ -24,6 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "nanobot_ts_distribution_probe"
 INFO = f"{PACKAGE}-0.0.0.dist-info"
+NODE_ARCHIVE_URL = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-linux-x64.tar.xz"
+NODE_ARCHIVE_SHA256 = "4f2b175a6d53a5c617a80dba2676238a0688cef28c6da4eba35c7d844e66fcfb"
 
 
 def build_wheel(node: Path, license_file: Path, output: Path) -> Path:
@@ -61,14 +66,21 @@ def build_wheel(node: Path, license_file: Path, output: Path) -> Path:
 
 
 def read_line(process: subprocess.Popen, timeout: float = 15) -> dict:
+    deadline = time.monotonic() + timeout
+    line = bytearray()
     with selectors.DefaultSelector() as selector:
         selector.register(process.stdout, selectors.EVENT_READ)
-        if not selector.select(timeout):
-            raise TimeoutError("Packaged gateway did not report readiness/shutdown")
-    line = process.stdout.readline()
-    if not line:
-        raise RuntimeError(f"Gateway exited: {process.stderr.read()}")
-    return json.loads(line)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise TimeoutError("Packaged gateway did not report readiness/shutdown")
+            # A partial line is readable too; readline() could wait past the deadline.
+            byte = os.read(process.stdout.fileno(), 1)
+            if not byte:
+                raise RuntimeError(f"Gateway closed stdout (exit={process.poll()})")
+            if byte == b"\n":
+                return json.loads(line)
+            line.extend(byte)
 
 
 def probe(node: Path, license_file: Path) -> dict:
@@ -87,27 +99,38 @@ def probe(node: Path, license_file: Path) -> dict:
         entry = environment / "bin/nanobot-ts-probe"
         evidence = []
         for stop_signal in (signal.SIGTERM, signal.SIGINT):
-            process = subprocess.Popen([entry], cwd=private_home, env=env, text=True,
+            process = subprocess.Popen([entry], cwd=private_home, env=env,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 ready = read_line(process)
-                assert ready["pid"] == process.pid  # exec preserves entry-point process identity
+                if ready["pid"] != process.pid:
+                    raise RuntimeError("Launcher did not preserve entry-point PID")
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                 with opener.open(f"http://127.0.0.1:{ready['port']}", timeout=5) as response:
                     identity = json.load(response)
-                assert identity["runtime"] == "v24.22.3"
-                assert str(environment) in identity["source"]
-                assert identity["source"].endswith(f"/{PACKAGE}/gateway.ts")
+                if identity["runtime"] != "v24.22.3":
+                    raise RuntimeError(f"Unexpected runtime: {identity}")
+                major, minor = platform.python_version_tuple()[:2]
+                expected_source = (
+                    environment / "lib" / f"python{major}.{minor}"
+                    / "site-packages" / PACKAGE / "gateway.ts"
+                ).as_uri()
+                if identity["source"] != expected_source:
+                    raise RuntimeError(f"Gateway did not run the installed wheel resource: {identity}")
                 process.send_signal(stop_signal)
                 stopped = read_line(process)
-                assert stopped == {"stopped": stop_signal.name}
-                assert process.wait(timeout=10) == 0
-                evidence.append({"signal": stop_signal.name, "exit": 0, "wheel_resource": True})
+                if stopped != {"stopped": stop_signal.name}:
+                    raise RuntimeError(f"Unexpected shutdown acknowledgement: {stopped}")
+                exit_code = process.wait(timeout=10)
+                if exit_code != 0:
+                    raise RuntimeError(f"Gateway failed shutdown with exit {exit_code}")
+                evidence.append({"signal": stop_signal.name, "exit": exit_code, "wheel_resource": True})
             finally:
                 if process.poll() is None:
                     process.kill()
                     process.wait(timeout=5)
-        assert list(private_home.iterdir()) == []
+        if list(private_home.iterdir()):
+            raise RuntimeError("Gateway wrote into the private home")
         return {"platform": "linux_x86_64", "node": "v24.22.3",
                 "node_sha256": hashlib.sha256(node.read_bytes()).hexdigest(),
                 "path": "empty directory", "home": "private and unchanged", "checks": evidence}
@@ -115,10 +138,31 @@ def probe(node: Path, license_file: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--node", type=Path, required=True)
-    parser.add_argument("--node-license", type=Path, required=True)
+    parser.add_argument("--node-archive", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(probe(args.node.resolve(), args.node_license.resolve()), indent=2))
+    archive_path = args.node_archive.resolve()
+    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    if digest != NODE_ARCHIVE_SHA256:
+        raise ValueError(f"Expected official Node archive {NODE_ARCHIVE_SHA256}, got {digest}")
+    with tempfile.TemporaryDirectory(prefix="nanobot-ts-node-") as directory:
+        root = Path(directory)
+        with tarfile.open(archive_path) as archive:
+            # Copy only the two expected files after verifying the immutable archive.
+            for name in ("bin/node", "LICENSE"):
+                member = archive.getmember(f"node-v24.22.3-linux-x64/{name}")
+                if not member.isfile():
+                    raise ValueError(f"Expected regular archive member: {name}")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ValueError(f"Cannot read archive member: {name}")
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read())
+                target.chmod(0o755 if name == "bin/node" else 0o644)
+        result = probe(root / "bin/node", root / "LICENSE")
+        result.update({"archive_url": NODE_ARCHIVE_URL, "archive_sha256": digest,
+                       "license_sha256": hashlib.sha256((root / "LICENSE").read_bytes()).hexdigest()})
+        print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

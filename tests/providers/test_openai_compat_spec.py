@@ -366,6 +366,7 @@ async def test_openai_compat_stream_forwards_tool_call_argument_deltas(
         )
 
     expected = _tool_stream_fixture()["expected"]
+    assert len(result.tool_calls) == 1
     assert deltas == expected["deltas"]
     assert result.tool_calls[0].id == expected["tool_call"]["id"]
     assert result.tool_calls[0].name == expected["tool_call"]["name"]

@@ -5,7 +5,7 @@ These synthetic records preserve IDs, ordering, optional fields and durable valu
 | Fixture | Observable contract | Python reference |
 | --- | --- | --- |
 | `config.json` | Config aliases, environment expansion and saved values | `tests/config/test_config_migration.py`, `tests/config/test_env_interpolation.py`, `tests/config/test_config_atomic_save.py` |
-| `gateway-chat.json` | A real gateway creates a session and emits the model reply followed by completion | `tests/webui/test_gateway_webui_smoke.py` |
+| `gateway-chat.json` | A real gateway creates a session and emits the model-information command reply followed by completion | `tests/webui/test_gateway_webui_smoke.py` |
 | `openai-chat-tools.json` | Ordered partial tool arguments produce one identified call, decoded newline, normalized usage and terminal reason | `tests/providers/test_openai_compat_spec.py::test_openai_compat_stream_forwards_tool_call_argument_deltas` |
 | `stored-session.json` | Metadata extensions, model messages, provider state, checkpoint and follow-up survive v1 migration and reopen | `tests/session/test_sqlite_schema.py::test_ordered_upgrades_preserve_records_and_do_not_repeat_import` |
 
