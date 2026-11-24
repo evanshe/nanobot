@@ -315,3 +315,30 @@ for (const reason of ['pre-cancelled', 'old-generation', 'failed-journal'] as co
     const remaining = await runtime.loop.scanRecovery(); assert.equal(remaining.length, 1); assert.equal(remaining[0].canContinue, true);
   } finally { external.abort(); release(); await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('old-generation stop cannot acknowledge a new journal accepted while the old model drains', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, cancelled!: () => void, release!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; }), cancellation = new Promise<void>(resolve => { cancelled = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (_request, _callbacks, signal) => { signal!.addEventListener('abort', cancelled, { once: true }); entered(); await blocked; return frame('obsolete'); } });
+  try {
+    const turn = runtime.loop.processDirect('old input', { channel: 'websocket', sessionKey: 'websocket:generations' }); const rejected = assert.rejects(turn, /stopped/); await reached;
+    const old = await runtime.store.state.get('websocket:generations'), stopping = runtime.loop.stopSession(old.key, { expectedGeneration: old.generation }); await cancellation;
+    await runtime.store.state.reset(old.key); const fresh = await runtime.store.state.get(old.key);
+    const id = await runtime.store.state.queueFollowup(fresh.key, new InboundMessage({ channel: 'websocket', chatId: 'generations', senderId: 'user', content: 'new generation journal', sessionGeneration: fresh.generation }));
+    assert.ok(id); release(); await rejected; await stopping;
+    const saved = await runtime.store.state.get(fresh.key); assert.equal(saved.generation, fresh.generation); assert.match(JSON.stringify(saved.metadata.pending_user_followups), /new generation journal/); assert.deepEqual(saved.messages, []);
+    await assert.rejects(runtime.store.state.acknowledgeFollowups(fresh.key, [id!], undefined, old.generation), /replaced session/);
+    assert.match(JSON.stringify((await runtime.store.state.get(fresh.key)).metadata.pending_user_followups), /new generation journal/);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('stop acknowledgement rechecks its original generation inside the owner transaction', async () => isolated(async (directory, agent, builtin) => {
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => frame('unused') });
+  try {
+    const old = await runtime.store.state.get('websocket:ack-race'), id = await runtime.store.state.queueFollowup(old.key, new InboundMessage({ channel: 'websocket', chatId: 'ack-race', senderId: 'user', content: 'old journal' }));
+    const acknowledge = runtime.store.state.acknowledgeFollowups.bind(runtime.store.state); let replacement = '';
+    runtime.store.state.acknowledgeFollowups = async (key, ids, signal, generation) => {
+      await runtime.store.state.reset(key); const fresh = await runtime.store.state.get(key); replacement = fresh.generation;
+      await runtime.store.state.queueFollowup(key, new InboundMessage({ channel: 'websocket', chatId: 'ack-race', senderId: 'user', content: 'replacement journal', sessionGeneration: fresh.generation, metadata: { _recovery_followup_id: id! } }));
+      await acknowledge(key, ids, signal, generation);
+    };
+    await runtime.loop.stopSession(old.key); const saved = await runtime.store.state.get(old.key); assert.equal(saved.generation, replacement); assert.match(JSON.stringify(saved.metadata.pending_user_followups), /replacement journal/);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));

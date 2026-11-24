@@ -8,6 +8,7 @@ import type { SessionInfo } from './repository.ts';
 import type { SqlRead, SqlWrite } from './sqlite.ts';
 import { DEFAULT_SESSION_POLICY, SessionConflictError, encodeJson, equal, hiddenHistory, localTimestamp, newSession, publicHistoryMessage } from './records.ts';
 import type { SessionPolicy, SessionRecord } from './records.ts';
+export type FollowupAcceptance = Readonly<{ id: string | null; generation: string | null }>;
 export class SessionOperationQueueFullError extends Error {
   constructor(capacity: number) { super(`session operation queue is full: capacity=${capacity}`); this.name = 'SessionOperationQueueFullError'; }
 }
@@ -193,7 +194,10 @@ export class SessionState {
     }, { signal });
   }
   queueFollowup(key: string, message: InboundMessage, signal?: AbortSignal): Promise<string | null> {
-    if (message.channel !== 'websocket' && !isSessionMessageInput(message)) return Promise.resolve(null);
+    return this.acceptFollowup(key, message, signal).then(accepted => accepted.id);
+  }
+  acceptFollowup(key: string, message: InboundMessage, signal?: AbortSignal): Promise<FollowupAcceptance> {
+    if (message.channel !== 'websocket' && !isSessionMessageInput(message)) return Promise.resolve({ id: null, generation: null });
     const payload = cloneRecoveryInbound(message);
     return this.#submit([key], async () => {
       const committed = await this.#repository.driver.write(async transaction => {
@@ -209,11 +213,11 @@ export class SessionState {
         return { current, id, headerOnly };
       });
       if (committed.headerOnly) this.#publishHeader(committed.current); else this.#publish(committed.current);
-      return committed.id;
+      return { id: committed.id, generation: committed.current.generation };
     }, { signal });
   }
-  acknowledgeFollowups(key: string, ids: readonly string[], signal?: AbortSignal): Promise<void> {
-    const frozen = [...ids]; return this.mutateMetadata(key, metadata => acknowledgePendingFollowups({ metadata }, frozen), { signal }).then(() => {});
+  acknowledgeFollowups(key: string, ids: readonly string[], signal?: AbortSignal, expectedGeneration?: string): Promise<void> {
+    const frozen = [...ids]; return this.mutateMetadata(key, metadata => acknowledgePendingFollowups({ metadata }, frozen), { signal, expectedGeneration }).then(() => {});
   }
   commitSummary(source: SessionRecord, summary: string, archiveEnd: number, signal?: AbortSignal): Promise<void> {
     const prefix = structuredClone(source.messages.slice(0, archiveEnd)), generation = source.generation, lastActive = source.updatedAt;

@@ -55,6 +55,7 @@ export class AgentLoop {
   readonly #inboxes = new Map<string, InboxEntry[]>();
   readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
+  readonly #acceptedGenerations = new WeakMap<AbortController, string>();
   readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, { controller: AbortController; generation: string }>();
   readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
   constructor(options: AgentLoopOptions) { this.#options = { ...options }; this.#publisher = new RuntimeEventPublisher(options.bus); }
@@ -107,15 +108,27 @@ export class AgentLoop {
     if (this.#controlling.has(key)) throw new RuntimeBusyError('Session control is active');
     const release = this.#options.bus.admission.activity(); this.#controlling.add(key);
     try {
+      const jobs = [...this.#jobs.get(key) ?? []];
+      const admitted = new Set(jobs.map(job => this.#acceptedGenerations.get(job.controller)).filter((value): value is string => value !== undefined));
+      const captured = options.expectedGeneration ?? (admitted.size === 1 ? [...admitted][0] : undefined);
+      // An active job already has an owner-issued generation, so ordinary stop
+      // can cancel it synchronously without waiting behind storage I/O.
+      const originalHeader = captured === undefined ? this.#options.state.readHeader(key) : null;
       if (options.expectedGeneration !== undefined && (await this.#options.state.readHeader(key))?.generation !== options.expectedGeneration) return 0;
-      const jobs = [...this.#jobs.get(key) ?? []]; for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Session stopped', false));
+      for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Session stopped', false));
+      const original = await originalHeader;
       // Accepted journal callbacks may not have reached the owner yet when a
       // synchronous caller immediately stops. Drain them before taking the ID
       // snapshot; the control guard prevents new loop admission meanwhile.
       await Promise.allSettled(jobs.map(job => job.task));
-      const before = await this.#options.state.read(key), ids = before ? pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string') : [];
-      const current = await this.#options.state.readHeader(key);
-      if (ids.length && current && current.generation === before?.generation) await this.#options.state.acknowledgeFollowups(key, ids);
+      const acceptedGenerations = new Set(jobs.map(job => this.#acceptedGenerations.get(job.controller)).filter((value): value is string => value !== undefined));
+      const generation = captured ?? original?.generation ?? (acceptedGenerations.size === 1 ? [...acceptedGenerations][0] : undefined);
+      const before = await this.#options.state.readHeader(key);
+      if (generation !== undefined && before?.generation === generation) {
+        const ids = pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string');
+        if (ids.length) try { await this.#options.state.acknowledgeFollowups(key, ids, undefined, generation); }
+        catch (error) { if (!(error instanceof SessionConflictError)) throw error; }
+      }
       return jobs.length;
     } finally { this.#controlling.delete(key); release(); }
   }
@@ -173,13 +186,16 @@ export class AgentLoop {
       const inbox = this.#inboxes.get(key) ?? []; inbox.push(entry); this.#inboxes.set(key, inbox);
       entry.ready = (async () => {
         if (options.ephemeral) return;
-        const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id;
+        const accepted = await this.#options.state.acceptFollowup(key, message);
+        if (accepted.id) message.metadata._recovery_followup_id = accepted.id;
+        if (accepted.generation) this.#acceptedGenerations.set(controller, accepted.generation);
         const header = await this.#options.state.readHeader(key); controller.signal.throwIfAborted();
+        if (accepted.generation !== null && header?.generation !== accepted.generation) { entry.rejectedScope = true; return; }
         if (message.sessionGeneration !== null && header?.generation !== message.sessionGeneration || message.requireExistingSession && !header) { entry.rejectedScope = true; return; }
         // Only accepted input in this exact durable generation can supersede
         // recovery. Pre-cancellation, rejected scope and failed journals leave
         // the recovery owner and its persisted interruption untouched.
-        if (header) message.sessionGeneration = header.generation;
+        if (header) { message.sessionGeneration = header.generation; this.#acceptedGenerations.set(controller, header.generation); }
         const recovery = this.#activeResume.get(key);
         if (message.isUserInput && recovery && header?.generation === recovery.generation) recovery.controller.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
       })();
