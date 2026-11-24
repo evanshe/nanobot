@@ -1,0 +1,6 @@
+{
+  "model": { "kind": "runtime_model_changed", "model": "model", "modelPreset": null },
+  "progress": { "kind": "progress", "content": "working" },
+  "route": { "channel": "cli", "chatId": "other" },
+  "inbound": { "channel": "websocket", "senderId": "user", "chatId": "chat-a", "content": "hello", "metadata": { "trace_id": "turn-1" }, "sessionGeneration": "generation-1" }
+}

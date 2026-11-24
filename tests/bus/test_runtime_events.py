@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +21,7 @@ from nanobot.providers.base import LLMUsage
 
 
 async def test_local_state_subscriber_does_not_block_routed_delivery():
+    fixture = json.loads((Path(__file__).parents[2] / "packages/runtime-ts/test/fixtures/bus-events.json").read_text(encoding="utf-8"))
     bus = MessageBus()
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -27,15 +30,16 @@ async def test_local_state_subscriber_does_not_block_routed_delivery():
         await release.wait()
 
     bus.subscribe(observe, RuntimeModelChanged)
-    dispatch = asyncio.create_task(bus.publish(RuntimeModelChanged("model", None)))
+    dispatch = asyncio.create_task(bus.publish(RuntimeModelChanged(fixture["model"]["model"], fixture["model"]["modelPreset"])))
     try:
         await asyncio.wait_for(entered.wait(), timeout=1)
         await asyncio.wait_for(
-            bus.publish_event(ProgressEvent(content="working"), channel="cli", chat_id="other"),
+            bus.publish_event(ProgressEvent(content=fixture["progress"]["content"]),
+                              channel=fixture["route"]["channel"], chat_id=fixture["route"]["chatId"]),
             timeout=1,
         )
         message = await asyncio.wait_for(bus.consume_outbound(), timeout=1)
-        assert (message.chat_id, message.content) == ("other", "working")
+        assert (message.chat_id, message.content) == (fixture["route"]["chatId"], fixture["progress"]["content"])
         assert not dispatch.done()
     finally:
         release.set()

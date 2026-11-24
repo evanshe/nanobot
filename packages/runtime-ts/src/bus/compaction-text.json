@@ -1,0 +1,50 @@
+{
+  "started": {
+    "en": "Compressing context…",
+    "zh-CN": "正在压缩上下文…",
+    "zh-TW": "正在壓縮上下文…",
+    "fr": "Compression du contexte…",
+    "ja": "コンテキストを圧縮中…",
+    "ko": "컨텍스트 압축 중…",
+    "es": "Comprimiendo contexto…",
+    "pt-BR": "Compactando contexto…",
+    "vi": "Đang nén ngữ cảnh…",
+    "id": "Memadatkan konteks…"
+  },
+  "succeeded": {
+    "en": "Context compacted.",
+    "zh-CN": "上下文已压缩。",
+    "zh-TW": "上下文已壓縮。",
+    "fr": "Contexte compressé.",
+    "ja": "コンテキストを圧縮しました。",
+    "ko": "컨텍스트를 압축했습니다.",
+    "es": "Contexto comprimido.",
+    "pt-BR": "Contexto compactado.",
+    "vi": "Đã nén ngữ cảnh.",
+    "id": "Konteks dipadatkan."
+  },
+  "failed": {
+    "en": "Unable to compact context.",
+    "zh-CN": "无法压缩上下文。",
+    "zh-TW": "無法壓縮上下文。",
+    "fr": "Impossible de compresser le contexte.",
+    "ja": "コンテキストを圧縮できません。",
+    "ko": "컨텍스트 압축 실패.",
+    "es": "No se pudo comprimir el contexto.",
+    "pt-BR": "Não foi possível compactar o contexto.",
+    "vi": "Không thể nén ngữ cảnh.",
+    "id": "Gagal memadatkan konteks."
+  },
+  "cancelled": {
+    "en": "Context compaction cancelled.",
+    "zh-CN": "已取消压缩上下文。",
+    "zh-TW": "已取消壓縮上下文。",
+    "fr": "Compression du contexte annulée.",
+    "ja": "コンテキストの圧縮を取り消しました。",
+    "ko": "컨텍스트 압축을 취소했습니다.",
+    "es": "Compresión de contexto cancelada.",
+    "pt-BR": "Compactação de contexto cancelada.",
+    "vi": "Đã hủy nén ngữ cảnh.",
+    "id": "Pemadatan konteks dibatalkan."
+  }
+}
