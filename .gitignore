@@ -14,6 +14,7 @@ webui/dist/
 webui/coverage/
 webui/.vite/
 tui/node_modules/
+packages/runtime-ts/node_modules/
 tui/dist/
 *.tsbuildinfo
 

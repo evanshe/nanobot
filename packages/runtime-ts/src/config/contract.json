@@ -1,0 +1,4658 @@
+{
+  "$defs": {
+    "AgentDefaults": {
+      "description": "Default agent configuration.",
+      "properties": {
+        "workspace": {
+          "title": "Workspace",
+          "type": "string",
+          "x-aliases": [
+            "workspace"
+          ],
+          "x-output": "workspace",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": "~/.nanobot/workspace"
+        },
+        "modelPreset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Modelpreset",
+          "x-aliases": [
+            "modelPreset",
+            "model_preset"
+          ],
+          "x-output": "modelPreset",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "model": {
+          "default": "anthropic/claude-opus-4-5",
+          "title": "Model",
+          "type": "string",
+          "x-aliases": [
+            "model"
+          ],
+          "x-output": "model",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "provider": {
+          "default": "auto",
+          "title": "Provider",
+          "type": "string",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "supportsImages": {
+          "default": true,
+          "title": "Supportsimages",
+          "type": "boolean",
+          "x-aliases": [
+            "supportsImages",
+            "supports_images"
+          ],
+          "x-output": "supportsImages",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxTokens": {
+          "default": 8192,
+          "title": "Maxtokens",
+          "type": "integer",
+          "x-aliases": [
+            "maxTokens",
+            "max_tokens"
+          ],
+          "x-output": "maxTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "contextWindowTokens": {
+          "default": 200000,
+          "title": "Contextwindowtokens",
+          "type": "integer",
+          "x-aliases": [
+            "contextWindowTokens",
+            "context_window_tokens"
+          ],
+          "x-output": "contextWindowTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "temperature": {
+          "default": 0.1,
+          "title": "Temperature",
+          "type": "number",
+          "x-aliases": [
+            "temperature"
+          ],
+          "x-output": "temperature",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "fallbackModels": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InlineFallbackConfig"
+              }
+            ]
+          },
+          "title": "Fallbackmodels",
+          "type": "array",
+          "x-aliases": [
+            "fallbackModels",
+            "fallback_models"
+          ],
+          "x-output": "fallbackModels",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "maxToolIterations": {
+          "default": 200,
+          "title": "Maxtooliterations",
+          "type": "integer",
+          "x-aliases": [
+            "maxToolIterations",
+            "max_tool_iterations"
+          ],
+          "x-output": "maxToolIterations",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxConcurrentSubagents": {
+          "default": 4,
+          "minimum": 1,
+          "title": "Maxconcurrentsubagents",
+          "type": "integer",
+          "x-aliases": [
+            "maxConcurrentSubagents",
+            "max_concurrent_subagents"
+          ],
+          "x-output": "maxConcurrentSubagents",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxToolResultChars": {
+          "default": 16000,
+          "title": "Maxtoolresultchars",
+          "type": "integer",
+          "x-aliases": [
+            "maxToolResultChars",
+            "max_tool_result_chars"
+          ],
+          "x-output": "maxToolResultChars",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "providerRetryMode": {
+          "default": "standard",
+          "enum": [
+            "standard",
+            "persistent"
+          ],
+          "title": "Providerretrymode",
+          "type": "string",
+          "x-aliases": [
+            "providerRetryMode",
+            "provider_retry_mode"
+          ],
+          "x-output": "providerRetryMode",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "toolHintMaxLength": {
+          "default": 40,
+          "maximum": 500,
+          "minimum": 20,
+          "title": "Toolhintmaxlength",
+          "type": "integer",
+          "x-aliases": [
+            "toolHintMaxLength",
+            "tool_hint_max_length"
+          ],
+          "x-output": "toolHintMaxLength",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningeffort",
+          "x-aliases": [
+            "reasoningEffort",
+            "reasoning_effort"
+          ],
+          "x-output": "reasoningEffort",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelAPIConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-aliases": [
+            "api"
+          ],
+          "x-output": "api",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "timezone": {
+          "default": "UTC",
+          "title": "Timezone",
+          "type": "string",
+          "x-aliases": [
+            "timezone"
+          ],
+          "x-output": "timezone",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "timezoneMode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "title": "Timezonemode",
+          "type": "string",
+          "x-aliases": [
+            "timezoneMode",
+            "timezone_mode"
+          ],
+          "x-output": "timezoneMode",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "botName": {
+          "default": "nanobot",
+          "title": "Botname",
+          "type": "string",
+          "x-aliases": [
+            "botName",
+            "bot_name"
+          ],
+          "x-output": "botName",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "botIcon": {
+          "default": "🐈",
+          "title": "Boticon",
+          "type": "string",
+          "x-aliases": [
+            "botIcon",
+            "bot_icon"
+          ],
+          "x-output": "botIcon",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "disabledSkills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Disabledskills",
+          "type": "array",
+          "x-aliases": [
+            "disabledSkills",
+            "disabled_skills"
+          ],
+          "x-output": "disabledSkills",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "idleCompactAfterMinutes": {
+          "default": 15,
+          "minimum": 0,
+          "title": "Idlecompactafterminutes",
+          "type": "integer",
+          "x-aliases": [
+            "idleCompactAfterMinutes",
+            "sessionTtlMinutes",
+            "session_ttl_minutes"
+          ],
+          "x-output": "idleCompactAfterMinutes",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "idleCompactCheckIntervalSeconds": {
+          "default": 60,
+          "minimum": 0,
+          "title": "Idlecompactcheckintervalseconds",
+          "type": "integer",
+          "x-aliases": [
+            "idleCompactCheckIntervalSeconds",
+            "idle_compact_check_interval_seconds"
+          ],
+          "x-output": "idleCompactCheckIntervalSeconds",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "dream": {
+          "$ref": "#/$defs/DreamConfig",
+          "x-aliases": [
+            "dream"
+          ],
+          "x-output": "dream",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enabled": true,
+            "intervalH": 2,
+            "cron": null,
+            "modelOverride": null
+          }
+        }
+      },
+      "title": "AgentDefaults",
+      "type": "object",
+      "x-model": "AgentDefaults",
+      "x-extra": "ignore"
+    },
+    "AgentsConfig": {
+      "description": "Agent configuration.",
+      "properties": {
+        "defaults": {
+          "$ref": "#/$defs/AgentDefaults",
+          "x-aliases": [
+            "defaults"
+          ],
+          "x-output": "defaults",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "workspace": "~/.nanobot/workspace",
+            "modelPreset": null,
+            "model": "anthropic/claude-opus-4-5",
+            "provider": "auto",
+            "supportsImages": true,
+            "maxTokens": 8192,
+            "contextWindowTokens": 200000,
+            "temperature": 0.1,
+            "fallbackModels": [],
+            "maxToolIterations": 200,
+            "maxConcurrentSubagents": 4,
+            "maxToolResultChars": 16000,
+            "providerRetryMode": "standard",
+            "toolHintMaxLength": 40,
+            "reasoningEffort": null,
+            "api": null,
+            "timezone": "UTC",
+            "timezoneMode": "auto",
+            "botName": "nanobot",
+            "botIcon": "🐈",
+            "disabledSkills": [],
+            "sessionTtlMinutes": 15,
+            "idleCompactCheckIntervalSeconds": 60,
+            "dream": {
+              "enabled": true,
+              "intervalH": 2,
+              "cron": null,
+              "modelOverride": null
+            }
+          }
+        }
+      },
+      "title": "AgentsConfig",
+      "type": "object",
+      "x-model": "AgentsConfig",
+      "x-extra": "ignore"
+    },
+    "BedrockProviderConfig": {
+      "description": "AWS Bedrock Runtime provider configuration.",
+      "properties": {
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displayname",
+          "x-aliases": [
+            "displayName",
+            "display_name"
+          ],
+          "x-output": "displayName",
+          "x-exclude": false,
+          "x-omit-null": true,
+          "x-strict": false
+        },
+        "apiKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apikey",
+          "x-aliases": [
+            "apiKey",
+            "api_key"
+          ],
+          "x-output": "apiKey",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "apiBase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apibase",
+          "x-aliases": [
+            "apiBase",
+            "api_base"
+          ],
+          "x-output": "apiBase",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderAPIConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-aliases": [
+            "api"
+          ],
+          "x-output": "api",
+          "x-exclude": false,
+          "x-omit-null": true,
+          "x-strict": false
+        },
+        "extraHeaders": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraheaders",
+          "x-aliases": [
+            "extraHeaders",
+            "extra_headers"
+          ],
+          "x-output": "extraHeaders",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraBody": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extrabody",
+          "x-aliases": [
+            "extraBody",
+            "extra_body"
+          ],
+          "x-output": "extraBody",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraQuery": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraquery",
+          "x-aliases": [
+            "extraQuery",
+            "extra_query"
+          ],
+          "x-output": "extraQuery",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "useProxy": {
+          "default": false,
+          "title": "Useproxy",
+          "type": "boolean",
+          "x-aliases": [
+            "useProxy",
+            "use_proxy"
+          ],
+          "x-output": "useProxy",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "thinkingStyle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinkingstyle",
+          "x-aliases": [
+            "thinkingStyle",
+            "thinking_style"
+          ],
+          "x-output": "thinkingStyle",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region",
+          "x-aliases": [
+            "region"
+          ],
+          "x-output": "region",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile",
+          "x-aliases": [
+            "profile"
+          ],
+          "x-output": "profile",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "BedrockProviderConfig",
+      "type": "object",
+      "x-model": "BedrockProviderConfig",
+      "x-extra": "ignore"
+    },
+    "ChannelsConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for chat channels.\n\nBuilt-in and plugin channel configs are stored as extra fields (dicts).\nEach channel parses its own config in __init__.\nPer-channel \"streaming\": true enables streaming output (requires send_delta impl).",
+      "properties": {
+        "sendProgress": {
+          "default": true,
+          "title": "Sendprogress",
+          "type": "boolean",
+          "x-aliases": [
+            "sendProgress",
+            "send_progress"
+          ],
+          "x-output": "sendProgress",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "sendToolHints": {
+          "default": true,
+          "title": "Sendtoolhints",
+          "type": "boolean",
+          "x-aliases": [
+            "sendToolHints",
+            "send_tool_hints"
+          ],
+          "x-output": "sendToolHints",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "showReasoning": {
+          "default": true,
+          "title": "Showreasoning",
+          "type": "boolean",
+          "x-aliases": [
+            "showReasoning",
+            "show_reasoning"
+          ],
+          "x-output": "showReasoning",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "showCompactionNotices": {
+          "default": false,
+          "title": "Showcompactionnotices",
+          "type": "boolean",
+          "x-aliases": [
+            "showCompactionNotices",
+            "show_compaction_notices"
+          ],
+          "x-output": "showCompactionNotices",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extractDocumentText": {
+          "default": true,
+          "title": "Extractdocumenttext",
+          "type": "boolean",
+          "x-aliases": [
+            "extractDocumentText",
+            "extract_document_text"
+          ],
+          "x-output": "extractDocumentText",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "sendMaxRetries": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Sendmaxretries",
+          "type": "integer",
+          "x-aliases": [
+            "sendMaxRetries",
+            "send_max_retries"
+          ],
+          "x-output": "sendMaxRetries",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "transcriptionProvider": {
+          "default": "groq",
+          "title": "Transcriptionprovider",
+          "type": "string",
+          "x-aliases": [
+            "transcriptionProvider",
+            "transcription_provider"
+          ],
+          "x-output": "transcriptionProvider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "transcriptionLanguage": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]{2,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transcriptionlanguage",
+          "x-aliases": [
+            "transcriptionLanguage",
+            "transcription_language"
+          ],
+          "x-output": "transcriptionLanguage",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "ChannelsConfig",
+      "type": "object",
+      "x-model": "ChannelsConfig",
+      "x-extra": "allow"
+    },
+    "CliAppsToolConfig": {
+      "description": "CLI Apps tool configuration.",
+      "properties": {
+        "enable": {
+          "default": true,
+          "title": "Enable",
+          "type": "boolean",
+          "x-aliases": [
+            "enable"
+          ],
+          "x-output": "enable",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "installTimeout": {
+          "default": 300,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Installtimeout",
+          "type": "integer",
+          "x-aliases": [
+            "installTimeout",
+            "install_timeout"
+          ],
+          "x-output": "installTimeout",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "runTimeout": {
+          "default": 60,
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Runtimeout",
+          "type": "integer",
+          "x-aliases": [
+            "runTimeout",
+            "run_timeout"
+          ],
+          "x-output": "runTimeout",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "catalogTtlSeconds": {
+          "default": 3600,
+          "maximum": 86400,
+          "minimum": 60,
+          "title": "Catalogttlseconds",
+          "type": "integer",
+          "x-aliases": [
+            "catalogTtlSeconds",
+            "catalog_ttl_seconds"
+          ],
+          "x-output": "catalogTtlSeconds",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "CliAppsToolConfig",
+      "type": "object",
+      "x-model": "CliAppsToolConfig",
+      "x-extra": "ignore"
+    },
+    "DreamConfig": {
+      "description": "Dream memory consolidation configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean",
+          "x-aliases": [
+            "enabled"
+          ],
+          "x-output": "enabled",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "intervalH": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Intervalh",
+          "type": "integer",
+          "x-aliases": [
+            "intervalH",
+            "interval_h"
+          ],
+          "x-output": "intervalH",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "cron": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cron",
+          "x-aliases": [
+            "cron"
+          ],
+          "x-output": "cron",
+          "x-exclude": false,
+          "x-omit-null": true,
+          "x-strict": false
+        },
+        "modelOverride": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Modeloverride",
+          "x-aliases": [
+            "modelOverride",
+            "model",
+            "model_override"
+          ],
+          "x-output": "modelOverride",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "DreamConfig",
+      "type": "object",
+      "x-model": "DreamConfig",
+      "x-extra": "ignore"
+    },
+    "ExecToolConfig": {
+      "description": "Shell exec tool configuration.",
+      "properties": {
+        "enable": {
+          "default": true,
+          "title": "Enable",
+          "type": "boolean",
+          "x-aliases": [
+            "enable"
+          ],
+          "x-output": "enable",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxRuntime": {
+          "default": 3600,
+          "minimum": 0,
+          "title": "Maxruntime",
+          "type": "integer",
+          "x-aliases": [
+            "maxRuntime",
+            "max_runtime",
+            "timeout"
+          ],
+          "x-output": "maxRuntime",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxRuntimeLimit": {
+          "default": 86400,
+          "exclusiveMinimum": 0,
+          "title": "Maxruntimelimit",
+          "type": "integer",
+          "x-aliases": [
+            "maxRuntimeLimit",
+            "max_runtime_limit"
+          ],
+          "x-output": "maxRuntimeLimit",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "idleTimeout": {
+          "default": 300,
+          "minimum": 0,
+          "title": "Idletimeout",
+          "type": "integer",
+          "x-aliases": [
+            "idleTimeout",
+            "idle_timeout"
+          ],
+          "x-output": "idleTimeout",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "idleAction": {
+          "default": "report",
+          "enum": [
+            "report",
+            "terminate"
+          ],
+          "title": "Idleaction",
+          "type": "string",
+          "x-aliases": [
+            "idleAction",
+            "idle_action"
+          ],
+          "x-output": "idleAction",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "pathPrepend": {
+          "default": "",
+          "title": "Pathprepend",
+          "type": "string",
+          "x-aliases": [
+            "pathPrepend",
+            "path_prepend"
+          ],
+          "x-output": "pathPrepend",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "pathAppend": {
+          "default": "",
+          "title": "Pathappend",
+          "type": "string",
+          "x-aliases": [
+            "pathAppend",
+            "path_append"
+          ],
+          "x-output": "pathAppend",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "sandbox": {
+          "default": "",
+          "title": "Sandbox",
+          "type": "string",
+          "x-aliases": [
+            "sandbox"
+          ],
+          "x-output": "sandbox",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "sandboxLauncher": {
+          "default": "",
+          "title": "Sandboxlauncher",
+          "type": "string",
+          "x-aliases": [
+            "sandboxLauncher",
+            "sandbox_launcher"
+          ],
+          "x-output": "sandboxLauncher",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "sandboxRoBinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sandboxrobinds",
+          "type": "array",
+          "x-aliases": [
+            "sandboxRoBinds",
+            "sandbox_ro_binds"
+          ],
+          "x-output": "sandboxRoBinds",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "sandboxRwBinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sandboxrwbinds",
+          "type": "array",
+          "x-aliases": [
+            "sandboxRwBinds",
+            "sandbox_rw_binds"
+          ],
+          "x-output": "sandboxRwBinds",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "allowedEnvKeys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowedenvkeys",
+          "type": "array",
+          "x-aliases": [
+            "allowedEnvKeys",
+            "allowed_env_keys"
+          ],
+          "x-output": "allowedEnvKeys",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "allowPatterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowpatterns",
+          "type": "array",
+          "x-aliases": [
+            "allowPatterns",
+            "allow_patterns"
+          ],
+          "x-output": "allowPatterns",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "denyPatterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Denypatterns",
+          "type": "array",
+          "x-aliases": [
+            "denyPatterns",
+            "deny_patterns"
+          ],
+          "x-output": "denyPatterns",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        }
+      },
+      "title": "ExecToolConfig",
+      "type": "object",
+      "x-model": "ExecToolConfig",
+      "x-extra": "ignore"
+    },
+    "FileToolsConfig": {
+      "description": "Filesystem tools configuration.",
+      "properties": {
+        "enable": {
+          "default": true,
+          "title": "Enable",
+          "type": "boolean",
+          "x-aliases": [
+            "enable"
+          ],
+          "x-output": "enable",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "FileToolsConfig",
+      "type": "object",
+      "x-model": "FileToolsConfig",
+      "x-extra": "ignore"
+    },
+    "GatewayConfig": {
+      "description": "Gateway/server configuration.",
+      "properties": {
+        "host": {
+          "default": "127.0.0.1",
+          "title": "Host",
+          "type": "string",
+          "x-aliases": [
+            "host"
+          ],
+          "x-output": "host",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "port": {
+          "default": 18790,
+          "title": "Port",
+          "type": "integer",
+          "x-aliases": [
+            "port"
+          ],
+          "x-output": "port",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "restartMode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "exec",
+            "spawn",
+            "exit"
+          ],
+          "title": "Restartmode",
+          "type": "string",
+          "x-aliases": [
+            "restartMode",
+            "restart_mode"
+          ],
+          "x-output": "restartMode",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "heartbeat": {
+          "$ref": "#/$defs/HeartbeatConfig",
+          "x-aliases": [
+            "heartbeat"
+          ],
+          "x-output": "heartbeat",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enabled": true,
+            "intervalS": 1800
+          }
+        }
+      },
+      "title": "GatewayConfig",
+      "type": "object",
+      "x-model": "GatewayConfig",
+      "x-extra": "ignore"
+    },
+    "HeartbeatConfig": {
+      "description": "Heartbeat service configuration (now backed by cron).",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean",
+          "x-aliases": [
+            "enabled"
+          ],
+          "x-output": "enabled",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "intervalS": {
+          "default": 1800,
+          "title": "Intervals",
+          "type": "integer",
+          "x-aliases": [
+            "intervalS",
+            "interval_s"
+          ],
+          "x-output": "intervalS",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "HeartbeatConfig",
+      "type": "object",
+      "x-model": "HeartbeatConfig",
+      "x-extra": "ignore"
+    },
+    "ImageGenerationToolConfig": {
+      "description": "Image generation tool configuration.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean",
+          "x-aliases": [
+            "enabled"
+          ],
+          "x-output": "enabled",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "model": {
+          "default": "openai/gpt-5.4-image-2",
+          "title": "Model",
+          "type": "string",
+          "x-aliases": [
+            "model"
+          ],
+          "x-output": "model",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "defaultAspectRatio": {
+          "default": "1:1",
+          "title": "Defaultaspectratio",
+          "type": "string",
+          "x-aliases": [
+            "defaultAspectRatio",
+            "default_aspect_ratio"
+          ],
+          "x-output": "defaultAspectRatio",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "defaultImageSize": {
+          "default": "1K",
+          "title": "Defaultimagesize",
+          "type": "string",
+          "x-aliases": [
+            "defaultImageSize",
+            "default_image_size"
+          ],
+          "x-output": "defaultImageSize",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxImagesPerTurn": {
+          "default": 4,
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Maximagesperturn",
+          "type": "integer",
+          "x-aliases": [
+            "maxImagesPerTurn",
+            "max_images_per_turn"
+          ],
+          "x-output": "maxImagesPerTurn",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "saveDir": {
+          "default": "generated",
+          "title": "Savedir",
+          "type": "string",
+          "x-aliases": [
+            "saveDir",
+            "save_dir"
+          ],
+          "x-output": "saveDir",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraHeaders": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraheaders",
+          "x-aliases": [
+            "extraHeaders",
+            "extra_headers"
+          ],
+          "x-output": "extraHeaders",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraBody": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extrabody",
+          "x-aliases": [
+            "extraBody",
+            "extra_body"
+          ],
+          "x-output": "extraBody",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "ImageGenerationToolConfig",
+      "type": "object",
+      "x-model": "ImageGenerationToolConfig",
+      "x-extra": "ignore"
+    },
+    "InlineFallbackConfig": {
+      "description": "One inline fallback model configuration.",
+      "properties": {
+        "extraHeaders": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraheaders",
+          "x-aliases": [
+            "extraHeaders",
+            "extra_headers"
+          ],
+          "x-output": "extraHeaders",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraQuery": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraquery",
+          "x-aliases": [
+            "extraQuery",
+            "extra_query"
+          ],
+          "x-output": "extraQuery",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraBody": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extrabody",
+          "x-aliases": [
+            "extraBody",
+            "extra_body"
+          ],
+          "x-output": "extraBody",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "model": {
+          "title": "Model",
+          "type": "string",
+          "x-aliases": [
+            "model"
+          ],
+          "x-output": "model",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "supportsImages": {
+          "default": true,
+          "title": "Supportsimages",
+          "type": "boolean",
+          "x-aliases": [
+            "supportsImages",
+            "supports_images"
+          ],
+          "x-output": "supportsImages",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxTokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxtokens",
+          "x-aliases": [
+            "maxTokens",
+            "max_tokens"
+          ],
+          "x-output": "maxTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "contextWindowTokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contextwindowtokens",
+          "x-aliases": [
+            "contextWindowTokens",
+            "context_window_tokens"
+          ],
+          "x-output": "contextWindowTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature",
+          "x-aliases": [
+            "temperature"
+          ],
+          "x-output": "temperature",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningeffort",
+          "x-aliases": [
+            "reasoningEffort",
+            "reasoning_effort"
+          ],
+          "x-output": "reasoningEffort",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelAPIConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-aliases": [
+            "api"
+          ],
+          "x-output": "api",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "required": [
+        "model",
+        "provider"
+      ],
+      "title": "InlineFallbackConfig",
+      "type": "object",
+      "x-model": "InlineFallbackConfig",
+      "x-extra": "ignore"
+    },
+    "MCPServerConfig": {
+      "description": "MCP server connection configuration (stdio or HTTP).",
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "stdio",
+                "sse",
+                "streamableHttp"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type",
+          "x-aliases": [
+            "type"
+          ],
+          "x-output": "type",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "const": "oauth",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth",
+          "x-aliases": [
+            "auth"
+          ],
+          "x-output": "auth",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "command": {
+          "default": "",
+          "title": "Command",
+          "type": "string",
+          "x-aliases": [
+            "command"
+          ],
+          "x-output": "command",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array",
+          "x-aliases": [
+            "args"
+          ],
+          "x-output": "args",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object",
+          "x-aliases": [
+            "env"
+          ],
+          "x-output": "env",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {}
+        },
+        "cwd": {
+          "default": "",
+          "title": "Cwd",
+          "type": "string",
+          "x-aliases": [
+            "cwd"
+          ],
+          "x-output": "cwd",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string",
+          "x-aliases": [
+            "url"
+          ],
+          "x-output": "url",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object",
+          "x-aliases": [
+            "headers"
+          ],
+          "x-output": "headers",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {}
+        },
+        "useProxy": {
+          "default": false,
+          "title": "Useproxy",
+          "type": "boolean",
+          "x-aliases": [
+            "useProxy",
+            "use_proxy"
+          ],
+          "x-output": "useProxy",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "toolTimeout": {
+          "default": 30,
+          "title": "Tooltimeout",
+          "type": "integer",
+          "x-aliases": [
+            "toolTimeout",
+            "tool_timeout"
+          ],
+          "x-output": "toolTimeout",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "enabledTools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Enabledtools",
+          "type": "array",
+          "x-aliases": [
+            "enabledTools",
+            "enabled_tools"
+          ],
+          "x-output": "enabledTools",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": [
+            "*"
+          ]
+        }
+      },
+      "title": "MCPServerConfig",
+      "type": "object",
+      "x-model": "MCPServerConfig",
+      "x-extra": "ignore"
+    },
+    "ModelAPIConfig": {
+      "description": "Allowed request APIs and preference for a model preset's endpoint.",
+      "properties": {
+        "supportedApis": {
+          "items": {
+            "enum": [
+              "chat_completions",
+              "responses",
+              "anthropic_messages"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supportedapis",
+          "type": "array",
+          "x-aliases": [
+            "supportedApis",
+            "supported_apis"
+          ],
+          "x-output": "supportedApis",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "preferredApi": {
+          "anyOf": [
+            {
+              "enum": [
+                "chat_completions",
+                "responses",
+                "anthropic_messages"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preferredapi",
+          "x-aliases": [
+            "preferredApi",
+            "preferred_api"
+          ],
+          "x-output": "preferredApi",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "required": [
+        "supportedApis"
+      ],
+      "title": "ModelAPIConfig",
+      "type": "object",
+      "x-model": "ModelAPIConfig",
+      "x-extra": "ignore"
+    },
+    "ModelPresetConfig": {
+      "description": "A named set of model + generation parameters for quick switching.",
+      "properties": {
+        "extraHeaders": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraheaders",
+          "x-aliases": [
+            "extraHeaders",
+            "extra_headers"
+          ],
+          "x-output": "extraHeaders",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraQuery": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraquery",
+          "x-aliases": [
+            "extraQuery",
+            "extra_query"
+          ],
+          "x-output": "extraQuery",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraBody": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extrabody",
+          "x-aliases": [
+            "extraBody",
+            "extra_body"
+          ],
+          "x-output": "extraBody",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "model": {
+          "title": "Model",
+          "type": "string",
+          "x-aliases": [
+            "model"
+          ],
+          "x-output": "model",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "provider": {
+          "default": "auto",
+          "title": "Provider",
+          "type": "string",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "supportsImages": {
+          "default": true,
+          "title": "Supportsimages",
+          "type": "boolean",
+          "x-aliases": [
+            "supportsImages",
+            "supports_images"
+          ],
+          "x-output": "supportsImages",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxTokens": {
+          "default": 8192,
+          "title": "Maxtokens",
+          "type": "integer",
+          "x-aliases": [
+            "maxTokens",
+            "max_tokens"
+          ],
+          "x-output": "maxTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "contextWindowTokens": {
+          "default": 200000,
+          "title": "Contextwindowtokens",
+          "type": "integer",
+          "x-aliases": [
+            "contextWindowTokens",
+            "context_window_tokens"
+          ],
+          "x-output": "contextWindowTokens",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "temperature": {
+          "default": 0.1,
+          "title": "Temperature",
+          "type": "number",
+          "x-aliases": [
+            "temperature"
+          ],
+          "x-output": "temperature",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningeffort",
+          "x-aliases": [
+            "reasoningEffort",
+            "reasoning_effort"
+          ],
+          "x-output": "reasoningEffort",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "codexFastMode": {
+          "anyOf": [
+            {
+              "type": "boolean",
+              "x-strict": true
+            },
+            {
+              "const": "ultrafast",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Codexfastmode",
+          "x-aliases": [
+            "codexFastMode",
+            "codex_fast_mode"
+          ],
+          "x-output": "codexFastMode",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelAPIConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-aliases": [
+            "api"
+          ],
+          "x-output": "api",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "ModelPresetConfig",
+      "type": "object",
+      "x-model": "ModelPresetConfig",
+      "x-extra": "ignore"
+    },
+    "MyToolConfig": {
+      "description": "Self-inspection tool configuration.",
+      "properties": {
+        "enable": {
+          "default": true,
+          "title": "Enable",
+          "type": "boolean",
+          "x-aliases": [
+            "enable"
+          ],
+          "x-output": "enable",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "allowSet": {
+          "default": false,
+          "title": "Allowset",
+          "type": "boolean",
+          "x-aliases": [
+            "allowSet",
+            "allow_set"
+          ],
+          "x-output": "allowSet",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "MyToolConfig",
+      "type": "object",
+      "x-model": "MyToolConfig",
+      "x-extra": "ignore"
+    },
+    "NetworkConfig": {
+      "properties": {
+        "proxy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proxy",
+          "x-aliases": [
+            "proxy"
+          ],
+          "x-output": "proxy",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "NetworkConfig",
+      "type": "object",
+      "x-model": "NetworkConfig",
+      "x-extra": "ignore"
+    },
+    "ProviderAPIConfig": {
+      "description": "Connection API defaults and custom endpoints' accepted request APIs.",
+      "properties": {
+        "supportedApis": {
+          "items": {
+            "enum": [
+              "chat_completions",
+              "responses",
+              "anthropic_messages"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Supportedapis",
+          "type": "array",
+          "x-aliases": [
+            "supportedApis",
+            "supported_apis"
+          ],
+          "x-output": "supportedApis",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "preferredApi": {
+          "anyOf": [
+            {
+              "enum": [
+                "chat_completions",
+                "responses",
+                "anthropic_messages"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preferredapi",
+          "x-aliases": [
+            "preferredApi",
+            "preferred_api"
+          ],
+          "x-output": "preferredApi",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "required": [
+        "supportedApis"
+      ],
+      "title": "ProviderAPIConfig",
+      "type": "object",
+      "x-model": "ProviderAPIConfig",
+      "x-extra": "ignore"
+    },
+    "ProviderConfig": {
+      "description": "LLM provider configuration.",
+      "properties": {
+        "displayName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displayname",
+          "x-aliases": [
+            "displayName",
+            "display_name"
+          ],
+          "x-output": "displayName",
+          "x-exclude": false,
+          "x-omit-null": true,
+          "x-strict": false
+        },
+        "apiKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apikey",
+          "x-aliases": [
+            "apiKey",
+            "api_key"
+          ],
+          "x-output": "apiKey",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "apiBase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apibase",
+          "x-aliases": [
+            "apiBase",
+            "api_base"
+          ],
+          "x-output": "apiBase",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "api": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderAPIConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-aliases": [
+            "api"
+          ],
+          "x-output": "api",
+          "x-exclude": false,
+          "x-omit-null": true,
+          "x-strict": false
+        },
+        "extraHeaders": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraheaders",
+          "x-aliases": [
+            "extraHeaders",
+            "extra_headers"
+          ],
+          "x-output": "extraHeaders",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraBody": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extrabody",
+          "x-aliases": [
+            "extraBody",
+            "extra_body"
+          ],
+          "x-output": "extraBody",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "extraQuery": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraquery",
+          "x-aliases": [
+            "extraQuery",
+            "extra_query"
+          ],
+          "x-output": "extraQuery",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "useProxy": {
+          "default": false,
+          "title": "Useproxy",
+          "type": "boolean",
+          "x-aliases": [
+            "useProxy",
+            "use_proxy"
+          ],
+          "x-output": "useProxy",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "thinkingStyle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinkingstyle",
+          "x-aliases": [
+            "thinkingStyle",
+            "thinking_style"
+          ],
+          "x-output": "thinkingStyle",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "ProviderConfig",
+      "type": "object",
+      "x-model": "ProviderConfig",
+      "x-extra": "ignore"
+    },
+    "ProvidersConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for LLM providers.\n\nSupports custom providers via extra fields — any additional field\nbecomes an OpenAI-compatible custom provider.",
+      "properties": {
+        "custom": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "custom"
+          ],
+          "x-output": "custom",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "azureOpenai": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "azureOpenai",
+            "azure_openai"
+          ],
+          "x-output": "azureOpenai",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "bedrock": {
+          "$ref": "#/$defs/BedrockProviderConfig",
+          "x-aliases": [
+            "bedrock"
+          ],
+          "x-output": "bedrock",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null,
+            "region": null,
+            "profile": null
+          }
+        },
+        "anthropic": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "anthropic"
+          ],
+          "x-output": "anthropic",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "openai": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "openai"
+          ],
+          "x-output": "openai",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "openrouter": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "openrouter"
+          ],
+          "x-output": "openrouter",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "orcarouter": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "orcarouter"
+          ],
+          "x-output": "orcarouter",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "shengsuanyun": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "shengsuanyun"
+          ],
+          "x-output": "shengsuanyun",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "assemblyai": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "assemblyai"
+          ],
+          "x-output": "assemblyai",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "huggingface": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "huggingface"
+          ],
+          "x-output": "huggingface",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "skywork": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "skywork"
+          ],
+          "x-output": "skywork",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "deepseek": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "deepseek"
+          ],
+          "x-output": "deepseek",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "groq": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "groq"
+          ],
+          "x-output": "groq",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "zhipu": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "zhipu"
+          ],
+          "x-output": "zhipu",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "dashscope": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "dashscope"
+          ],
+          "x-output": "dashscope",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "modelscope": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "modelscope"
+          ],
+          "x-output": "modelscope",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "vllm": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "vllm"
+          ],
+          "x-output": "vllm",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "ollama": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "ollama"
+          ],
+          "x-output": "ollama",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "lmStudio": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "lmStudio",
+            "lm_studio"
+          ],
+          "x-output": "lmStudio",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "atomicChat": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "atomicChat",
+            "atomic_chat"
+          ],
+          "x-output": "atomicChat",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "ovms": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "ovms"
+          ],
+          "x-output": "ovms",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "gemini": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "gemini"
+          ],
+          "x-output": "gemini",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "moonshot": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "moonshot"
+          ],
+          "x-output": "moonshot",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "kimiCoding": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "kimiCoding",
+            "kimi_coding"
+          ],
+          "x-output": "kimiCoding",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "minimax": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "minimax"
+          ],
+          "x-output": "minimax",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "minimaxAnthropic": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "minimaxAnthropic",
+            "minimax_anthropic"
+          ],
+          "x-output": "minimaxAnthropic",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "mistral": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "mistral"
+          ],
+          "x-output": "mistral",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "stepfun": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "stepfun"
+          ],
+          "x-output": "stepfun",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "xiaomiMimo": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "xiaomiMimo",
+            "xiaomi_mimo"
+          ],
+          "x-output": "xiaomiMimo",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "longcat": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "longcat"
+          ],
+          "x-output": "longcat",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "antLing": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "antLing",
+            "ant_ling"
+          ],
+          "x-output": "antLing",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "aihubmix": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "aihubmix"
+          ],
+          "x-output": "aihubmix",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "siliconflow": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "siliconflow"
+          ],
+          "x-output": "siliconflow",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "edenai": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "edenai"
+          ],
+          "x-output": "edenai",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "novita": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "novita"
+          ],
+          "x-output": "novita",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "volcengine": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "volcengine"
+          ],
+          "x-output": "volcengine",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "volcengineCodingPlan": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "volcengineCodingPlan",
+            "volcengine_coding_plan"
+          ],
+          "x-output": "volcengineCodingPlan",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "byteplus": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "byteplus"
+          ],
+          "x-output": "byteplus",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "byteplusCodingPlan": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "byteplusCodingPlan",
+            "byteplus_coding_plan"
+          ],
+          "x-output": "byteplusCodingPlan",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "openaiCodex": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "openaiCodex",
+            "openai_codex"
+          ],
+          "x-output": "openaiCodex",
+          "x-exclude": true,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "xaiGrok": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "xaiGrok",
+            "xai_grok"
+          ],
+          "x-output": "xaiGrok",
+          "x-exclude": true,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "githubCopilot": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "githubCopilot",
+            "github_copilot"
+          ],
+          "x-output": "githubCopilot",
+          "x-exclude": true,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "qianfan": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "qianfan"
+          ],
+          "x-output": "qianfan",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "nvidia": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "nvidia"
+          ],
+          "x-output": "nvidia",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "opencode": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "opencode"
+          ],
+          "x-output": "opencode",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "opencodeZen": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "opencodeZen",
+            "opencode_zen"
+          ],
+          "x-output": "opencodeZen",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        },
+        "opencodeGo": {
+          "$ref": "#/$defs/ProviderConfig",
+          "x-aliases": [
+            "opencodeGo",
+            "opencode_go"
+          ],
+          "x-output": "opencodeGo",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "displayName": null,
+            "apiKey": null,
+            "apiBase": null,
+            "api": null,
+            "extraHeaders": null,
+            "extraBody": null,
+            "extraQuery": null,
+            "useProxy": false,
+            "thinkingStyle": null
+          }
+        }
+      },
+      "title": "ProvidersConfig",
+      "type": "object",
+      "x-model": "ProvidersConfig",
+      "x-extra": "allow"
+    },
+    "ToolsConfig": {
+      "description": "Root settings assembled from tool-owned configuration models.",
+      "properties": {
+        "web": {
+          "$ref": "#/$defs/WebToolsConfig",
+          "x-aliases": [
+            "web"
+          ],
+          "x-output": "web",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enable": true,
+            "useProxy": false,
+            "userAgent": null,
+            "search": {
+              "provider": "duckduckgo",
+              "apiKey": "",
+              "baseUrl": "",
+              "maxResults": 5,
+              "timeout": 30
+            },
+            "fetch": {
+              "useJinaReader": true
+            }
+          }
+        },
+        "exec": {
+          "$ref": "#/$defs/ExecToolConfig",
+          "x-aliases": [
+            "exec"
+          ],
+          "x-output": "exec",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enable": true,
+            "maxRuntime": 3600,
+            "maxRuntimeLimit": 86400,
+            "idleTimeout": 300,
+            "idleAction": "report",
+            "pathPrepend": "",
+            "pathAppend": "",
+            "sandbox": "",
+            "sandboxLauncher": "",
+            "sandboxRoBinds": [],
+            "sandboxRwBinds": [],
+            "allowedEnvKeys": [],
+            "allowPatterns": [],
+            "denyPatterns": []
+          }
+        },
+        "file": {
+          "$ref": "#/$defs/FileToolsConfig",
+          "x-aliases": [
+            "file"
+          ],
+          "x-output": "file",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enable": true
+          }
+        },
+        "cliApps": {
+          "$ref": "#/$defs/CliAppsToolConfig",
+          "x-aliases": [
+            "cliApps",
+            "cli_apps"
+          ],
+          "x-output": "cliApps",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enable": true,
+            "installTimeout": 300,
+            "runTimeout": 60,
+            "catalogTtlSeconds": 3600
+          }
+        },
+        "my": {
+          "$ref": "#/$defs/MyToolConfig",
+          "x-aliases": [
+            "my"
+          ],
+          "x-output": "my",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enable": true,
+            "allowSet": false
+          }
+        },
+        "imageGeneration": {
+          "$ref": "#/$defs/ImageGenerationToolConfig",
+          "x-aliases": [
+            "imageGeneration",
+            "image_generation"
+          ],
+          "x-output": "imageGeneration",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "enabled": false,
+            "provider": "openrouter",
+            "model": "openai/gpt-5.4-image-2",
+            "defaultAspectRatio": "1:1",
+            "defaultImageSize": "1K",
+            "maxImagesPerTurn": 4,
+            "saveDir": "generated",
+            "extraHeaders": null,
+            "extraBody": null
+          }
+        },
+        "maxSessionMessagesPerMinute": {
+          "default": 6,
+          "minimum": 1,
+          "title": "Maxsessionmessagesperminute",
+          "type": "integer",
+          "x-aliases": [
+            "maxSessionMessagesPerMinute",
+            "max_session_messages_per_minute"
+          ],
+          "x-output": "maxSessionMessagesPerMinute",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "restrictToWorkspace": {
+          "default": false,
+          "title": "Restricttoworkspace",
+          "type": "boolean",
+          "x-aliases": [
+            "restrictToWorkspace",
+            "restrict_to_workspace"
+          ],
+          "x-output": "restrictToWorkspace",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "webuiAllowLocalServiceAccess": {
+          "default": true,
+          "title": "Webuiallowlocalserviceaccess",
+          "type": "boolean",
+          "x-aliases": [
+            "webuiAllowLocalServiceAccess",
+            "webui_allow_local_service_access",
+            "allowLocalPreviewAccess",
+            "allow_local_preview_access"
+          ],
+          "x-output": "webuiAllowLocalServiceAccess",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "webuiAllowRemotePackageInstall": {
+          "default": false,
+          "title": "Webuiallowremotepackageinstall",
+          "type": "boolean",
+          "x-aliases": [
+            "webuiAllowRemotePackageInstall",
+            "webui_allow_remote_package_install"
+          ],
+          "x-output": "webuiAllowRemotePackageInstall",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "mcpServers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MCPServerConfig"
+          },
+          "title": "Mcpservers",
+          "type": "object",
+          "x-aliases": [
+            "mcpServers",
+            "mcp_servers"
+          ],
+          "x-output": "mcpServers",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {}
+        },
+        "ssrfWhitelist": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ssrfwhitelist",
+          "type": "array",
+          "x-aliases": [
+            "ssrfWhitelist",
+            "ssrf_whitelist"
+          ],
+          "x-output": "ssrfWhitelist",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": []
+        }
+      },
+      "title": "ToolsConfig",
+      "type": "object",
+      "x-model": "ToolsConfig",
+      "x-extra": "ignore"
+    },
+    "TranscriptionConfig": {
+      "description": "Cross-channel audio transcription configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean",
+          "x-aliases": [
+            "enabled"
+          ],
+          "x-output": "enabled",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model",
+          "x-aliases": [
+            "model"
+          ],
+          "x-output": "model",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "language": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]{2,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language",
+          "x-aliases": [
+            "language"
+          ],
+          "x-output": "language",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxDurationSec": {
+          "default": 120,
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Maxdurationsec",
+          "type": "integer",
+          "x-aliases": [
+            "maxDurationSec",
+            "max_duration_sec"
+          ],
+          "x-output": "maxDurationSec",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxUploadMb": {
+          "default": 25,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Maxuploadmb",
+          "type": "integer",
+          "x-aliases": [
+            "maxUploadMb",
+            "max_upload_mb"
+          ],
+          "x-output": "maxUploadMb",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "TranscriptionConfig",
+      "type": "object",
+      "x-model": "TranscriptionConfig",
+      "x-extra": "ignore"
+    },
+    "WebFetchConfig": {
+      "description": "Web fetch tool configuration.",
+      "properties": {
+        "useJinaReader": {
+          "default": true,
+          "title": "Usejinareader",
+          "type": "boolean",
+          "x-aliases": [
+            "useJinaReader",
+            "use_jina_reader"
+          ],
+          "x-output": "useJinaReader",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "WebFetchConfig",
+      "type": "object",
+      "x-model": "WebFetchConfig",
+      "x-extra": "ignore"
+    },
+    "WebSearchConfig": {
+      "description": "Web search configuration.",
+      "properties": {
+        "provider": {
+          "default": "duckduckgo",
+          "title": "Provider",
+          "type": "string",
+          "x-aliases": [
+            "provider"
+          ],
+          "x-output": "provider",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "apiKey": {
+          "default": "",
+          "title": "Apikey",
+          "type": "string",
+          "x-aliases": [
+            "apiKey",
+            "api_key"
+          ],
+          "x-output": "apiKey",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "baseUrl": {
+          "default": "",
+          "title": "Baseurl",
+          "type": "string",
+          "x-aliases": [
+            "baseUrl",
+            "base_url"
+          ],
+          "x-output": "baseUrl",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "maxResults": {
+          "default": 5,
+          "title": "Maxresults",
+          "type": "integer",
+          "x-aliases": [
+            "maxResults",
+            "max_results"
+          ],
+          "x-output": "maxResults",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "timeout": {
+          "default": 30,
+          "title": "Timeout",
+          "type": "integer",
+          "x-aliases": [
+            "timeout"
+          ],
+          "x-output": "timeout",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        }
+      },
+      "title": "WebSearchConfig",
+      "type": "object",
+      "x-model": "WebSearchConfig",
+      "x-extra": "ignore"
+    },
+    "WebToolsConfig": {
+      "description": "Web tools configuration.",
+      "properties": {
+        "enable": {
+          "default": true,
+          "title": "Enable",
+          "type": "boolean",
+          "x-aliases": [
+            "enable"
+          ],
+          "x-output": "enable",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "useProxy": {
+          "default": false,
+          "title": "Useproxy",
+          "type": "boolean",
+          "x-aliases": [
+            "useProxy",
+            "use_proxy"
+          ],
+          "x-output": "useProxy",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "userAgent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Useragent",
+          "x-aliases": [
+            "userAgent",
+            "user_agent"
+          ],
+          "x-output": "userAgent",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
+        "search": {
+          "$ref": "#/$defs/WebSearchConfig",
+          "x-aliases": [
+            "search"
+          ],
+          "x-output": "search",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "provider": "duckduckgo",
+            "apiKey": "",
+            "baseUrl": "",
+            "maxResults": 5,
+            "timeout": 30
+          }
+        },
+        "fetch": {
+          "$ref": "#/$defs/WebFetchConfig",
+          "x-aliases": [
+            "fetch"
+          ],
+          "x-output": "fetch",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false,
+          "default": {
+            "useJinaReader": true
+          }
+        }
+      },
+      "title": "WebToolsConfig",
+      "type": "object",
+      "x-model": "WebToolsConfig",
+      "x-extra": "ignore"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root configuration for nanobot.",
+  "properties": {
+    "agents": {
+      "$ref": "#/$defs/AgentsConfig",
+      "x-aliases": [
+        "agents"
+      ],
+      "x-output": "agents",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "defaults": {
+          "workspace": "~/.nanobot/workspace",
+          "modelPreset": null,
+          "model": "anthropic/claude-opus-4-5",
+          "provider": "auto",
+          "supportsImages": true,
+          "maxTokens": 8192,
+          "contextWindowTokens": 200000,
+          "temperature": 0.1,
+          "fallbackModels": [],
+          "maxToolIterations": 200,
+          "maxConcurrentSubagents": 4,
+          "maxToolResultChars": 16000,
+          "providerRetryMode": "standard",
+          "toolHintMaxLength": 40,
+          "reasoningEffort": null,
+          "api": null,
+          "timezone": "UTC",
+          "timezoneMode": "auto",
+          "botName": "nanobot",
+          "botIcon": "🐈",
+          "disabledSkills": [],
+          "sessionTtlMinutes": 15,
+          "idleCompactCheckIntervalSeconds": 60,
+          "dream": {
+            "enabled": true,
+            "intervalH": 2,
+            "cron": null,
+            "modelOverride": null
+          }
+        }
+      }
+    },
+    "channels": {
+      "$ref": "#/$defs/ChannelsConfig",
+      "x-aliases": [
+        "channels"
+      ],
+      "x-output": "channels",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "sendProgress": true,
+        "sendToolHints": true,
+        "showReasoning": true,
+        "showCompactionNotices": false,
+        "extractDocumentText": true,
+        "sendMaxRetries": 3,
+        "transcriptionProvider": "groq",
+        "transcriptionLanguage": null
+      }
+    },
+    "transcription": {
+      "$ref": "#/$defs/TranscriptionConfig",
+      "x-aliases": [
+        "transcription"
+      ],
+      "x-output": "transcription",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "enabled": true,
+        "provider": null,
+        "model": null,
+        "language": null,
+        "maxDurationSec": 120,
+        "maxUploadMb": 25
+      }
+    },
+    "providers": {
+      "$ref": "#/$defs/ProvidersConfig",
+      "x-aliases": [
+        "providers"
+      ],
+      "x-output": "providers",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "custom": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "azureOpenai": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "bedrock": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null,
+          "region": null,
+          "profile": null
+        },
+        "anthropic": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "openai": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "openrouter": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "orcarouter": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "shengsuanyun": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "assemblyai": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "huggingface": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "skywork": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "deepseek": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "groq": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "zhipu": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "dashscope": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "modelscope": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "vllm": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "ollama": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "lmStudio": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "atomicChat": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "ovms": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "gemini": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "moonshot": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "kimiCoding": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "minimax": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "minimaxAnthropic": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "mistral": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "stepfun": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "xiaomiMimo": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "longcat": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "antLing": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "aihubmix": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "siliconflow": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "edenai": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "novita": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "volcengine": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "volcengineCodingPlan": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "byteplus": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "byteplusCodingPlan": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "openaiCodex": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "xaiGrok": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "githubCopilot": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "qianfan": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "nvidia": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "opencode": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "opencodeZen": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        },
+        "opencodeGo": {
+          "displayName": null,
+          "apiKey": null,
+          "apiBase": null,
+          "api": null,
+          "extraHeaders": null,
+          "extraBody": null,
+          "extraQuery": null,
+          "useProxy": false,
+          "thinkingStyle": null
+        }
+      }
+    },
+    "network": {
+      "$ref": "#/$defs/NetworkConfig",
+      "x-aliases": [
+        "network"
+      ],
+      "x-output": "network",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "proxy": null
+      }
+    },
+    "gateway": {
+      "$ref": "#/$defs/GatewayConfig",
+      "x-aliases": [
+        "gateway"
+      ],
+      "x-output": "gateway",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "host": "127.0.0.1",
+        "port": 18790,
+        "restartMode": "auto",
+        "heartbeat": {
+          "enabled": true,
+          "intervalS": 1800
+        }
+      }
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolsConfig",
+      "x-aliases": [
+        "tools"
+      ],
+      "x-output": "tools",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {
+        "web": {
+          "enable": true,
+          "useProxy": false,
+          "userAgent": null,
+          "search": {
+            "provider": "duckduckgo",
+            "apiKey": "",
+            "baseUrl": "",
+            "maxResults": 5,
+            "timeout": 30
+          },
+          "fetch": {
+            "useJinaReader": true
+          }
+        },
+        "exec": {
+          "enable": true,
+          "maxRuntime": 3600,
+          "maxRuntimeLimit": 86400,
+          "idleTimeout": 300,
+          "idleAction": "report",
+          "pathPrepend": "",
+          "pathAppend": "",
+          "sandbox": "",
+          "sandboxLauncher": "",
+          "sandboxRoBinds": [],
+          "sandboxRwBinds": [],
+          "allowedEnvKeys": [],
+          "allowPatterns": [],
+          "denyPatterns": []
+        },
+        "file": {
+          "enable": true
+        },
+        "cliApps": {
+          "enable": true,
+          "installTimeout": 300,
+          "runTimeout": 60,
+          "catalogTtlSeconds": 3600
+        },
+        "my": {
+          "enable": true,
+          "allowSet": false
+        },
+        "imageGeneration": {
+          "enabled": false,
+          "provider": "openrouter",
+          "model": "openai/gpt-5.4-image-2",
+          "defaultAspectRatio": "1:1",
+          "defaultImageSize": "1K",
+          "maxImagesPerTurn": 4,
+          "saveDir": "generated",
+          "extraHeaders": null,
+          "extraBody": null
+        },
+        "maxSessionMessagesPerMinute": 6,
+        "restrictToWorkspace": false,
+        "webuiAllowLocalServiceAccess": true,
+        "webuiAllowRemotePackageInstall": false,
+        "mcpServers": {},
+        "ssrfWhitelist": []
+      }
+    },
+    "modelPresets": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ModelPresetConfig"
+      },
+      "title": "Modelpresets",
+      "type": "object",
+      "x-aliases": [
+        "modelPresets",
+        "model_presets"
+      ],
+      "x-output": "modelPresets",
+      "x-exclude": false,
+      "x-omit-null": false,
+      "x-strict": false,
+      "default": {}
+    }
+  },
+  "title": "Config",
+  "type": "object",
+  "x-model": "Config",
+  "x-extra": "forbid",
+  "x-provider-names": [
+    "custom",
+    "azure_openai",
+    "bedrock",
+    "openrouter",
+    "orcarouter",
+    "shengsuanyun",
+    "edenai",
+    "opencode",
+    "opencode_zen",
+    "opencode_go",
+    "huggingface",
+    "skywork",
+    "aihubmix",
+    "siliconflow",
+    "novita",
+    "volcengine",
+    "volcengine_coding_plan",
+    "byteplus",
+    "byteplus_coding_plan",
+    "anthropic",
+    "openai",
+    "openai_codex",
+    "xai_grok",
+    "github_copilot",
+    "deepseek",
+    "gemini",
+    "zhipu",
+    "dashscope",
+    "modelscope",
+    "moonshot",
+    "kimi_coding",
+    "minimax",
+    "minimax_anthropic",
+    "mistral",
+    "stepfun",
+    "xiaomi_mimo",
+    "longcat",
+    "ant_ling",
+    "vllm",
+    "ollama",
+    "lm_studio",
+    "atomic_chat",
+    "ovms",
+    "nvidia",
+    "groq",
+    "assemblyai",
+    "qianfan"
+  ]
+}
