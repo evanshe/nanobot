@@ -109,8 +109,11 @@ export class AgentLoop {
     try {
       if (options.expectedGeneration !== undefined && (await this.#options.state.readHeader(key))?.generation !== options.expectedGeneration) return 0;
       const jobs = [...this.#jobs.get(key) ?? []]; for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Session stopped', false));
-      const before = await this.#options.state.read(key), ids = before ? pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string') : [];
+      // Accepted journal callbacks may not have reached the owner yet when a
+      // synchronous caller immediately stops. Drain them before taking the ID
+      // snapshot; the control guard prevents new loop admission meanwhile.
       await Promise.allSettled(jobs.map(job => job.task));
+      const before = await this.#options.state.read(key), ids = before ? pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string') : [];
       const current = await this.#options.state.readHeader(key);
       if (ids.length && current && current.generation === before?.generation) await this.#options.state.acknowledgeFollowups(key, ids);
       return jobs.length;

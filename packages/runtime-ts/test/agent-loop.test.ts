@@ -282,3 +282,13 @@ test('recovery scan includes a journal-only accepted input before its first turn
     await runtime.loop.stopSession(candidate.key); assert.deepEqual(await runtime.loop.scanRecovery('websocket:'), []);
   } finally { await runtime.loop.close(); await runtime.store.close(); }
 }));
+
+test('an immediate stop drains accepted journal admissions before acknowledging their ids', async () => isolated(async (directory, agent, builtin) => {
+  let calls = 0; const runtime = await create(directory, agent, builtin, { chatStream: async () => { calls++; return frame('never'); } });
+  try {
+    const inputs = ['first', 'second'].map(content => runtime.loop.processDirect(content, { channel: 'websocket', sessionKey: 'websocket:immediate' }));
+    const stopped = runtime.loop.processDirect('/stop', { channel: 'websocket', sessionKey: 'websocket:immediate' });
+    const outcomes = await Promise.allSettled(inputs); assert.ok(outcomes.every(item => item.status === 'rejected')); await stopped;
+    const saved = await runtime.store.state.get('websocket:immediate'); assert.equal(saved.metadata.pending_user_followups, undefined); assert.deepEqual(saved.messages, []); assert.equal(calls, 0);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
