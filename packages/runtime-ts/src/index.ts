@@ -10,3 +10,4 @@ export { withNamespaceLock, atomicPrivateWrite } from './session/files.ts';
 export * from './session/open.ts';
 export * from './session/recovery.ts';
 export * from './provider/chat.ts';
+export type { ChatToolCall, ChatToolDelta, ChatUsage } from './provider/values.ts';

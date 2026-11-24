@@ -1,3 +1,5 @@
+import { ChatToolAccumulator, chatUsage, parseChatToolCalls, replayChatArguments } from './values.ts';
+import type { ChatToolCall, ChatToolDelta, ChatUsage } from './values.ts';
 import { randomUUID } from 'node:crypto';
 import { object } from '../config/decoder.ts';
 import type { ConfigObject, Json } from '../config/decoder.ts';
@@ -6,8 +8,8 @@ export type ChatRequest = {
   messages: readonly ConfigObject[]; model?: string; max_tokens?: number; temperature?: number;
   reasoning_effort?: string; tools?: readonly ConfigObject[]; tool_choice?: string | ConfigObject;
 };
-export type ChatResponse = { content: string | null; reasoning_content: string | null; finish_reason: string };
-export type ChatCallbacks = { onContentDelta?: (text: string) => void | Promise<void>; onThinkingDelta?: (text: string) => void | Promise<void> };
+export type ChatResponse = { content: string | null; reasoning_content: string | null; finish_reason: string; tool_calls: ChatToolCall[]; usage: ChatUsage | null };
+export type ChatCallbacks = { onContentDelta?: (text: string) => void | Promise<void>; onThinkingDelta?: (text: string) => void | Promise<void>; onToolCallDelta?: (delta: ChatToolDelta) => void | Promise<void> };
 export type ChatProviderOptions = {
   apiBase: string; apiKey?: string; defaultModel?: string; extraHeaders?: Record<string, string>;
   extraBody?: ConfigObject; extraQuery?: Record<string, string>;
@@ -46,7 +48,27 @@ function messagesForWire(messages: readonly ConfigObject[]): ConfigObject[] {
   }
   let last: ConfigObject | undefined;
   while (merged.at(-1)?.role === 'assistant') last = merged.pop();
-  if (!merged.length && last) merged.push({ role: 'user', content: last.content || '(empty)' });
+  if (merged.length && last && !merged.some(msg => msg.role === 'user' || msg.role === 'tool')) merged.push({ ...last, role: 'user' });
+  const first = merged.findIndex(msg => msg.role !== 'system');
+  if (first >= 0 && merged[first].role === 'assistant' && !merged[first].tool_calls) merged.splice(first, 0, { role: 'user', content: '(conversation continued)' });
+  const pending = new Map<string, string[]>();
+  for (const message of merged) {
+    if (Array.isArray(message.tool_calls)) {
+      const used = new Set<string>();
+      message.tool_calls = message.tool_calls.map(raw => {
+        if (!object(raw)) return raw;
+        const call = { ...raw }; let identifier = typeof call.id === 'string' ? call.id : '';
+        while (!identifier || used.has(identifier)) identifier = randomUUID().replaceAll('-', '').slice(0, 9);
+        used.add(identifier); call.id = identifier;
+        if (typeof raw.id === 'string' && raw.id) pending.set(raw.id, [...pending.get(raw.id) ?? [], identifier]);
+        if (object(call.function)) call.function = { ...call.function, arguments: replayChatArguments(call.function.arguments) };
+        return call;
+      });
+    }
+    if (typeof message.tool_call_id === 'string') {
+      const queue = pending.get(message.tool_call_id); if (queue?.length) message.tool_call_id = queue.shift()!;
+    }
+  }
   return merged;
 }
 export function chatText(value: Json | undefined): string | null {
@@ -89,23 +111,40 @@ export class OpenAIChatProvider {
     const response = await this.#request(request, false, signal), payload: unknown = await response.json();
     if (!object(payload)) throw new TypeError('Chat response must be an object');
     const choices = Array.isArray(payload.choices) ? payload.choices.filter(object) : [], first = choices[0], message = first && object(first.message) ? first.message : {};
-    return { content: chatText(message.content), reasoning_content: chatText(message.reasoning_content ?? message.reasoning), finish_reason: typeof first?.finish_reason === 'string' ? first.finish_reason : 'stop' };
+    let content = chatText(message.content), reason = chatText(message.reasoning_content ?? message.reasoning), finish = typeof first?.finish_reason === 'string' ? first.finish_reason : 'stop';
+    const calls: Json[] = [];
+    for (const choice of choices) {
+      const msg = object(choice.message) ? choice.message : {};
+      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length) { calls.push(...msg.tool_calls); if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') finish = choice.finish_reason; }
+      content ||= chatText(msg.content); reason ??= chatText(msg.reasoning_content);
+    }
+    return { content, reasoning_content: reason, finish_reason: finish, tool_calls: parseChatToolCalls(calls), usage: chatUsage(payload) };
   }
   async chatStream(request: ChatRequest, callbacks: ChatCallbacks = {}, signal?: AbortSignal): Promise<ChatResponse> {
     const response = await this.#request(request, true, signal);
     if (!response.body) throw new Error('Chat stream has no body');
-    let content = '', reasoning = '', finish = 'stop', completed = false;
+    let content = '', reasoning = '', finish = 'stop', completed = false, usage: ChatUsage | null = null;
+    const tools = new ChatToolAccumulator();
     for await (const payload of sseJson(response.body)) {
       const choice = Array.isArray(payload.choices) ? payload.choices[0] : undefined;
-      if (!object(choice)) continue;
+      if (!object(choice)) { usage = chatUsage(payload) ?? usage; const text = chatText(payload.content || payload.output_text); if (text) content += text; continue; }
       if (choice.finish_reason) { finish = String(choice.finish_reason); completed = true; }
       const delta = object(choice.delta) ? choice.delta : {};
       const text = chatText(delta.content), thought = chatText(delta.reasoning_content ?? delta.reasoning) || thinking(delta.content);
       if (text) { await callbacks.onContentDelta?.(text); content += text; }
       if (thought) { await callbacks.onThinkingDelta?.(thought); reasoning += thought; }
+      for (const [hint, call] of (Array.isArray(delta.tool_calls) ? delta.tool_calls : []).entries()) {
+        if (!object(call)) continue; const fn = object(call.function) ? call.function : {}, index = typeof call.index === 'number' ? call.index : hint;
+        await callbacks.onToolCallDelta?.({ index, call_id: String(call.id || ''), name: String(fn.name || ''), arguments_delta: String(fn.arguments || '') }); tools.add(call, index);
+      }
+      if (object(delta.function_call)) {
+        const fn = delta.function_call;
+        await callbacks.onToolCallDelta?.({ index: 0, call_id: '', name: String(fn.name || ''), arguments_delta: String(fn.arguments || '') }); tools.add({ function: fn }, 0);
+      }
+      usage = chatUsage(payload) ?? usage;
     }
     if (!completed) throw new Error('Model stream ended before a finish reason was received');
-    return { content: content || null, reasoning_content: reasoning || null, finish_reason: finish };
+    return { content: content || null, reasoning_content: reasoning || null, finish_reason: finish, tool_calls: tools.finish(), usage };
   }
 }
 async function* sseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<ConfigObject> {
