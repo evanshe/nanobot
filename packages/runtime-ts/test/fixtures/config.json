@@ -1,0 +1,12 @@
+{
+  "input": {
+    "providers": { "groq": { "apiKey": "${NANOBOT_TEST_GROQ_KEY}" } },
+    "tools": { "myEnabled": false, "mySet": true }
+  },
+  "environment": { "NANOBOT_TEST_GROQ_KEY": "fixture-key" },
+  "expected": {
+    "unresolvedApiKey": "${NANOBOT_TEST_GROQ_KEY}",
+    "resolvedApiKey": "fixture-key",
+    "savedMyTool": { "enable": false, "allowSet": true }
+  }
+}

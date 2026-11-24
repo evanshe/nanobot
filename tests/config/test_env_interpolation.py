@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,20 +42,25 @@ class TestResolveSingleEnvRefs:
 
 class TestResolveConfig:
     def test_resolves_env_vars_in_config(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("TEST_API_KEY", "resolved-key")
+        fixture_path = Path(__file__).resolve().parents[2] / "packages/runtime-ts/test/fixtures/config.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        expected = fixture["expected"]
+        for name, value in fixture["environment"].items():
+            monkeypatch.setenv(name, value)
         config_path = tmp_path / "config.json"
-        config_path.write_text(
-            json.dumps(
-                {"providers": {"groq": {"apiKey": "${TEST_API_KEY}"}}}
-            ),
-            encoding="utf-8",
-        )
+        config_path.write_text(json.dumps(fixture["input"]), encoding="utf-8")
 
         raw = load_config(config_path)
-        assert raw.providers.groq.api_key == "${TEST_API_KEY}"
+        assert raw.providers.groq.api_key == expected["unresolvedApiKey"]
 
         resolved = resolve_config_env_vars(raw)
-        assert resolved.providers.groq.api_key == "resolved-key"
+        assert resolved.providers.groq.api_key == expected["resolvedApiKey"]
+
+        save_config(raw, config_path)
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        assert saved["providers"]["groq"]["apiKey"] == expected["unresolvedApiKey"]
+        assert saved["tools"]["my"] == expected["savedMyTool"]
+        assert "myEnabled" not in saved["tools"] and "mySet" not in saved["tools"]
 
     def test_missing_env_var_reports_config_field(self, tmp_path, monkeypatch):
         name = "NANOBOT_TEST_MISSING_PROVIDER_KEY"

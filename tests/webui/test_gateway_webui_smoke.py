@@ -274,6 +274,8 @@ async def _recv_until(ws: websockets.WebSocketClientProtocol, event: str) -> dic
 
 @pytest.mark.asyncio
 async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Path) -> None:
+    fixture_path = Path(__file__).resolve().parents[2] / "packages/runtime-ts/test/fixtures/gateway-chat.json"
+    scenario = json.loads(fixture_path.read_text(encoding="utf-8"))
     ws_port = _free_port()
     gateway_port = _free_port()
     workspace = tmp_path / "workspace"
@@ -296,12 +298,12 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
     base_url = f"http://127.0.0.1:{ws_port}"
     try:
         bootstrap = _wait_for_bootstrap(base_url, process, log_path)
-        assert bootstrap["model_name"] == "custom/smoke-model"
+        assert bootstrap["model_name"] == scenario["bootstrap"]["model_name"]
 
-        ws_url = f'{bootstrap["ws_url"]}?token={bootstrap["token"]}&client_id=smoke'
+        ws_url = f'{bootstrap["ws_url"]}?token={bootstrap["token"]}&client_id={scenario["client_id"]}'
         async with websockets.connect(ws_url) as ws:
             ready = await _recv_until(ws, "ready")
-            assert ready["client_id"] == "smoke"
+            assert ready["client_id"] == scenario["client_id"]
 
             # An old WebUI can still connect, but cannot start the retired listener.
             await ws.send(json.dumps({
@@ -314,22 +316,18 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             assert rejected["ok"] is False and rejected["error"]["status"] == 404
             assert config_path.read_bytes() == before
 
-            await ws.send(json.dumps({"type": "new_chat"}))
+            await ws.send(json.dumps(scenario["create"]))
             attached = await _recv_until(ws, "attached")
             chat_id = attached["chat_id"]
             await _recv_until(ws, "session_updated")
 
-            await ws.send(json.dumps({
-                "type": "message",
-                "chat_id": chat_id,
-                "content": "/model",
-                "webui": True,
-                "turn_id": "smoke-turn",
-            }))
-            answer = await _recv_until(ws, "message")
-            assert "Current model: `custom/smoke-model`" in answer["text"]
-            assert "render_as" not in answer  # Keep the model's inline code as Markdown.
-            await _recv_until(ws, "turn_end")
+            await ws.send(json.dumps({**scenario["turn"], "chat_id": chat_id}))
+            answer = await _recv_until(ws, scenario["reply"]["event"])
+            assert answer["chat_id"] == chat_id and answer["turn_id"] == scenario["turn"]["turn_id"]
+            assert scenario["reply"]["text_contains"] in answer["text"]
+            assert all(field not in answer for field in scenario["reply"]["absent_fields"])
+            completion = await _recv_until(ws, scenario["completion"]["event"])
+            assert completion["chat_id"] == chat_id and completion["turn_id"] == answer["turn_id"]
 
             await ws.send(json.dumps({
                 "type": "message", "chat_id": chat_id, "content": "/help", "webui": True, "turn_id": "help-turn", "locale": "fr",
@@ -359,7 +357,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
 
         api_token = _wait_for_bootstrap(base_url, process, log_path)["api_token"]
         sessions = _get_json(f"{base_url}/api/sessions", token=api_token)
-        key = f"websocket:{chat_id}"
+        key = f'{scenario["session_key_prefix"]}{chat_id}'
         assert key in {row["key"] for row in sessions["sessions"]}
 
         encoded_key = quote(key, safe="")
@@ -372,8 +370,8 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             for event in thread["events"]
             if event.get("event") in {"user_message", "message", "stream_end"}
         ]
-        assert "/model" in contents
-        assert any("Current model: `custom/smoke-model`" in text for text in contents)
+        assert scenario["turn"]["content"] in contents
+        assert any(scenario["reply"]["text_contains"] in text for text in contents)
         assert "!echo shell-ok" in contents
         assert shell["text"] in contents
         [help_history] = [event for event in thread["events"] if event.get("event") == "message"

@@ -1,0 +1,9 @@
+{
+  "bootstrap": { "model_name": "custom/smoke-model" },
+  "client_id": "smoke",
+  "create": { "type": "new_chat" },
+  "turn": { "type": "message", "content": "/model", "webui": true, "turn_id": "smoke-turn" },
+  "reply": { "event": "message", "text_contains": "Current model: `custom/smoke-model`", "absent_fields": ["render_as"] },
+  "completion": { "event": "turn_end" },
+  "session_key_prefix": "websocket:"
+}
