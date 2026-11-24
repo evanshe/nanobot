@@ -1,3 +1,4 @@
+import { isLocalChatEndpoint } from './endpoint.ts';
 import { ChatTransportError, chatFailure, resolveChatIdleTimeoutMs } from './errors.ts';
 import type { ChatErrorMetadata } from './errors.ts';
 import { ChatToolAccumulator, chatUsage, parseChatToolCalls, replayChatArguments } from './values.ts';
@@ -149,7 +150,7 @@ export class OpenAIChatProvider {
     const body = this.#body(request); if (stream) { body.stream = true; body.stream_options = { include_usage: true }; }
     const headers = new Headers({ 'content-type': 'application/json', authorization: `Bearer ${this.#options.apiKey || 'no-key'}`, 'x-session-affinity': this.#affinity });
     for (const [name, value] of Object.entries(this.#options.extraHeaders ?? {})) headers.set(name, value);
-    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal, redirect: isLocalChatEndpoint(this.#options.apiBase) ? 'manual' : 'follow' });
     if (!response.ok) {
       const body = await response.text(); let payload: unknown; try { payload = JSON.parse(body); } catch { payload = null; }
       throw new ChatTransportError(`HTTP ${response.status}: ${body.slice(0, 500)}`, { status: response.status, headers: response.headers, ...(object(payload) ? { payload } : {}) });

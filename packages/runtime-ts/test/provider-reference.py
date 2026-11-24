@@ -5,7 +5,7 @@ import os
 import sys
 from dataclasses import asdict
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider, _is_local_endpoint
 
 request = json.load(sys.stdin)
 if 'timeout_s' in request:
@@ -47,6 +47,9 @@ async def main():
             'tool_calls': [asdict(call) for call in result.tool_calls],
             'usage': result.usage.to_dict() if result.usage else None,
         }, 'content': content, 'thinking': thinking, 'tools': tools}
+        if request.get('endpoint_cases'):
+            output['local_endpoints'] = [_is_local_endpoint(None, base)
+                                         for base in request['endpoint_cases']]
         if request.get('exact_arguments'):
             output['argument_json'] = [json.dumps(call.arguments, ensure_ascii=False)
                                        for call in result.tool_calls]

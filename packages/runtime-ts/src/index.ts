@@ -13,3 +13,4 @@ export * from './provider/chat.ts';
 export type { ChatToolCall, ChatToolDelta, ChatUsage } from './provider/values.ts';
 export { isTransientChatResponse, resolveChatIdleTimeoutMs } from './provider/errors.ts';
 export type { ChatErrorMetadata } from './provider/errors.ts';
+export { isLocalChatEndpoint } from './provider/endpoint.ts';

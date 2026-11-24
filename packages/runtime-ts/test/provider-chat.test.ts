@@ -7,10 +7,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { OpenAIChatProvider, isTransientChatResponse, resolveChatIdleTimeoutMs } from '@nanobot/runtime';
+import { OpenAIChatProvider, isTransientChatResponse, resolveChatIdleTimeoutMs, isLocalChatEndpoint } from '@nanobot/runtime';
 import type { ChatRequest, ChatResponse } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-export async function pythonReference(input: object): Promise<{ response: ChatResponse; transient?: boolean; argument_json?: string[]; content: string[]; thinking: string[]; tools: object[] }> {
+export async function pythonReference(input: object): Promise<{ response: ChatResponse; transient?: boolean; argument_json?: string[]; local_endpoints?: boolean[]; content: string[]; thinking: string[]; tools: object[] }> {
   const child = spawn(process.env.NANOBOT_TEST_PYTHON ?? join(root, '.venv/bin/python'), [fileURLToPath(new URL('./provider-reference.py', import.meta.url))], { cwd: root, env: { ...process.env, PYTHONPATH: root } });
   let stdout = '', stderr = ''; child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
   child.stdin.end(JSON.stringify(input)); const [code] = await once(child, 'close'); assert.equal(code, 0, stderr); return JSON.parse(stdout);
@@ -233,4 +233,24 @@ test('fresh Chat and split SSE arguments follow Python strip and preserve unsafe
       });
     }
   }
+});
+test('local Chat redirects match Python and never forward synthetic body or custom headers to another port', { timeout: 15_000 }, async () => {
+  await stub(async (destination, destinationRequests) => {
+    await stub(async (base, sourceRequests) => {
+      for (const stream of [false, true]) {
+        const reference = await pythonReference({ base, request: synthetic, stream, headers: { 'x-synthetic-private': 'fixture-only' } });
+        const provider = new OpenAIChatProvider({ apiBase: base, extraHeaders: { 'x-synthetic-private': 'fixture-only' } });
+        const response = stream ? await provider.chatStream(synthetic) : await provider.chat(synthetic);
+        assert.equal(response.error_status_code, 307); assert.equal(reference.response.error_status_code, 307); await provider.close();
+      }
+      assert.equal(sourceRequests.length, 4); assert.equal(destinationRequests.length, 0);
+    }, response => { response.writeHead(307, { location: `${destination}/chat/completions` }); response.end(); });
+  }, response => { response.setHeader('content-type', 'application/json'); response.end('{}'); });
+});
+test('local redirect endpoint ranges and hostname handling match the Python IP oracle', async () => {
+  const cases = ['localhost', 'LOCALHOST', 'localhost.', 'host.docker.internal', '127.0.0.1', '127.1', '10.1.2.3', '172.16.0.1', '172.32.0.1', '192.168.1.2', '192.0.0.9', '192.0.0.8', '100.64.0.1', '198.51.100.1', '8.8.8.8', '[::1]', '[::]', '[fc00::1]', '[fe80::1]', '[::ffff:127.0.0.1]', '[::ffff:8.8.8.8]', '[::ffff:0:7f00:1]', '[2001:1::1]', '[2001:1::3]', '[2001:db8::1]', '[2001:4860:4860::8888]', 'public.invalid'].map(host => `http://${host}:1234/v1`);
+  await stub(async base => {
+    const reference = await pythonReference({ base, request: synthetic, endpoint_cases: cases });
+    assert.deepEqual(cases.map(isLocalChatEndpoint), reference.local_endpoints);
+  }, response => { response.setHeader('content-type', 'application/json'); response.end('{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'); });
 });
