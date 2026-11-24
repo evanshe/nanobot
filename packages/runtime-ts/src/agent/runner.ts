@@ -91,7 +91,7 @@ export class AgentRunner {
       if (!accepted.length) return false;
       messages.push(...structuredClone(accepted)); result.had_injections = true; return true;
     };
-    const runId = randomUUID(), lengths: string[] = []; let sequence = 0, empty = 0, lastStreamedContent = ''; 
+    const runId = randomUUID(), lengths: string[] = []; let sequence = 0, empty = 0, lastStreamedContent = '';
     const checkpoint = async (phase: AgentCheckpoint['phase'], iteration: number, message: ConfigObject | null, completed: ConfigObject[] = [], pending: ConfigObject[] = []) => {
       const batchSize = phase === 'model_input' ? 0 : 1 + completed.length;
       await spec.onCheckpoint?.(structuredClone({ phase, iteration, model: spec.modelName, assistant_message: message, completed_tool_results: completed, pending_tool_calls: pending, preceding_messages: messages.slice(start, messages.length - batchSize), ...(phase === 'awaiting_tools' || phase === 'model_input' ? {} : { provider_state: null }) }));

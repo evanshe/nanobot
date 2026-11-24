@@ -274,3 +274,11 @@ test('bus /stop bypasses the session queue, drains active work and emits the str
     const idle = await runtime.loop.processDirect('/stop', { sessionKey: 'websocket:stop' }); assert.equal(idle?.event?.kind, 'command_result'); assert.equal(calls, 1);
   } finally { intake.abort(); await running; await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('recovery scan includes a journal-only accepted input before its first turn starts', async () => isolated(async (directory, agent, builtin) => {
+  let calls = 0; const runtime = await create(directory, agent, builtin, { chatStream: async () => { calls++; return frame('never'); } });
+  try {
+    await runtime.store.state.queueFollowup('websocket:only-queued', new InboundMessage({ channel: 'websocket', chatId: 'only-queued', senderId: 'user', content: 'accepted but not started' }));
+    const [candidate] = await runtime.loop.scanRecovery('websocket:'); assert.equal(candidate.key, 'websocket:only-queued'); assert.equal(candidate.pendingFollowups, 1); assert.equal(candidate.pendingInput, false); assert.equal(candidate.canContinue, false); assert.equal(candidate.requiresConfirmation, true); assert.equal(calls, 0);
+    await runtime.loop.stopSession(candidate.key); assert.deepEqual(await runtime.loop.scanRecovery('websocket:'), []);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));

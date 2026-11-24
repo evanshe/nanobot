@@ -136,10 +136,10 @@ export class AgentLoop {
       if (this.#tails.has(key)) continue;
       const candidate = await this.#serial(key, async () => {
         const session = await this.#options.state.read(key); if (!session) return null;
-        const checkpoint = session.metadata.runtime_checkpoint, pending = Boolean(session.metadata.pending_user_turn);
-        if (!object(checkpoint) && !pending && !unfinished) return null;
+        const checkpoint = session.metadata.runtime_checkpoint, pending = Boolean(session.metadata.pending_user_turn), followups = pendingFollowups(session).length;
+        if (!object(checkpoint) && !pending && !unfinished && !followups) return null;
         const recoveryId = randomUUID(); this.#tickets.set(key, { id: recoveryId, fingerprint: recoveryFingerprint(session) });
-        return { recoveryId, canContinue: object(checkpoint) ? runtimeCheckpointIsWellFormed(checkpoint) && checkpoint.phase !== 'final_response' : pending, key, generation: session.generation, phase: object(checkpoint) && typeof checkpoint.phase === 'string' ? checkpoint.phase : null, checkpointValid: object(checkpoint) && runtimeCheckpointIsWellFormed(checkpoint), pendingInput: pending, pendingFollowups: pendingFollowups(session).length, unfinishedDisplayTurn: unfinished, requiresConfirmation: !(object(checkpoint) && checkpoint.phase === 'final_response' && runtimeCheckpointIsWellFormed(checkpoint)) };
+        return { recoveryId, canContinue: object(checkpoint) ? runtimeCheckpointIsWellFormed(checkpoint) && checkpoint.phase !== 'final_response' : pending, key, generation: session.generation, phase: object(checkpoint) && typeof checkpoint.phase === 'string' ? checkpoint.phase : null, checkpointValid: object(checkpoint) && runtimeCheckpointIsWellFormed(checkpoint), pendingInput: pending, pendingFollowups: followups, unfinishedDisplayTurn: unfinished, requiresConfirmation: !(object(checkpoint) && checkpoint.phase === 'final_response' && runtimeCheckpointIsWellFormed(checkpoint)) };
       }); if (candidate) result.push(candidate);
     }
     return result;
