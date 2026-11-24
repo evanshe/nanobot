@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
+from nanobot.agent.runner import AgentRunner
 from nanobot.utils import runtime
 
 root = Path(__file__).resolve().parents[1]
@@ -11,6 +12,7 @@ payload = {name: getattr(runtime, name) for name in (
     'EMPTY_FINAL_RESPONSE_MESSAGE', 'FINALIZATION_RETRY_PROMPT',
     'BUDGET_EXHAUSTED_FINALIZATION_PROMPT', 'LENGTH_RECOVERY_PROMPT',
 )}
+payload['MALFORMED_TOOL_CALL_PROMPT'] = AgentRunner._malformed_tool_call_retry_messages([], None)[0]['content']
 payload['MAX_ITERATIONS'] = (root / 'nanobot/templates/agent/max_iterations_message.md').read_text().strip()
 text = json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
 parser = argparse.ArgumentParser()

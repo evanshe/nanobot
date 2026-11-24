@@ -96,7 +96,7 @@ export class AgentRunner {
       const batchSize = phase === 'model_input' ? 0 : 1 + completed.length;
       await spec.onCheckpoint?.(structuredClone({ phase, iteration, model: spec.modelName, assistant_message: message, completed_tool_results: completed, pending_tool_calls: pending, preceding_messages: messages.slice(start, messages.length - batchSize), ...(phase === 'awaiting_tools' || phase === 'model_input' ? {} : { provider_state: null }) }));
     };
-    const invoke = async (requestMessages: ConfigObject[], tools: readonly ConfigObject[]): Promise<ChatResponse> => {
+    const invoke = async (requestMessages: ConfigObject[], tools: readonly ConfigObject[], mergeRound?: number, streaming = true): Promise<ChatResponse> => {
       signal.throwIfAborted(); lastStreamedContent = '';
       let prepared = await governor.prepare(requestMessages, tools, signal);
       if (spec.prepareRequest) { prepared = await spec.prepareRequest(structuredClone(prepared), structuredClone([...tools]), signal); governor.ensureFits(prepared, tools); }
@@ -105,11 +105,11 @@ export class AgentRunner {
       await events.emit({ kind: 'response_inputs', inputIds: ids }, signal); await emit('started');
       try {
         const request: ChatRequest = { messages: prepared, model: spec.modelName, max_tokens: spec.maxTokens ?? 4096, temperature: spec.temperature ?? 0.7, ...(spec.reasoningEffort === undefined ? {} : { reasoning_effort: spec.reasoningEffort }), ...(tools.length ? { tools } : {}) };
-        const response = await spec.model.chatStream(request, {
+        const response = await spec.model.chatStream(request, streaming ? {
           onContentDelta: async content => { lastStreamedContent += content; await events.emit({ kind: 'stream_delta', content }, signal); },
           onThinkingDelta: async content => events.emit({ kind: 'progress', content, reasoning: true, reasoningDelta: true }, signal),
           onToolCallDelta: async delta => events.emit({ kind: 'progress', content: '', toolEvents: [{ ...delta }] }, signal),
-        }, signal);
+        } : undefined, signal);
         signal.throwIfAborted(); governor.accept(requestMessages.length, prepared, response, tools); result.summary_checkpoint = governor.summaryCheckpoint;
         let round: LLMUsage;
         if (response.usage && response.usage.total_tokens > 0) round = usage(response.usage);
@@ -118,7 +118,8 @@ export class AgentRunner {
           const output = response.finish_reason === 'error' ? 0 : estimateAgentMessageBytes({ role: 'assistant', content: response.content || '', ...(response.tool_calls.length ? { tool_calls: response.tool_calls.map(agentToolCallMessage) } : {}), ...(response.reasoning_content === null ? {} : { reasoning_content: response.reasoning_content }) });
           round = { inputTokens: input, outputTokens: output, totalTokens: input + output, cacheReadTokens: null, cacheWriteTokens: null, reportedTokens: 0, estimatedTokens: input + output, generationMs: 0, measuredOutputTokens: 0, ttftMs: 0, timedRequests: 0, contextTokens: response.finish_reason === 'error' ? null : input, requestCount: 1 };
         }
-        result.round_usages.push(round); result.usage = result.usage ? addUsage(result.usage, round) : round;
+        if (mergeRound === undefined) result.round_usages.push(round); else result.round_usages[mergeRound] = addUsage(result.round_usages[mergeRound], round);
+        result.usage = result.round_usages.reduce((total, value) => total ? addUsage(total, value) : value, null as LLMUsage | null);
         await emit(response.finish_reason === 'error' ? 'failed' : 'completed', round);
         return structuredClone(response);
       } catch (error) { await emit(signal.aborted ? 'cancelled' : 'failed'); throw error; }
@@ -129,8 +130,19 @@ export class AgentRunner {
       else messages.push(value);
     };
     for (let iteration = 0; iteration < spec.maxIterations; iteration++) {
-      signal.throwIfAborted(); await drainInjections(); let response = await invoke(messages, spec.tools.definitions);
-      response.tool_calls = response.tool_calls.filter(call => typeof call.name === 'string' && call.name.length > 0);
+      signal.throwIfAborted(); await drainInjections();
+      const roundIndex = result.round_usages.length; let requestMessages = messages, response: ChatResponse;
+      for (let attempt = 0; ; attempt++) {
+        response = await invoke(requestMessages, attempt === 2 ? [] : spec.tools.definitions, attempt ? roundIndex : undefined, attempt !== 2);
+        const original = response.tool_calls.length, finish = response.finish_reason;
+        response.tool_calls = response.tool_calls.filter(call => typeof call.name === 'string' && call.name.length > 0);
+        const allDropped = original > 0 && !response.tool_calls.length;
+        if (allDropped && ['tool_calls', 'function_call'].includes(finish)) {
+          response.finish_reason = 'stop';
+          if (attempt < 2) { requestMessages = [...requestMessages, { role: 'user', content: prompts.MALFORMED_TOOL_CALL_PROMPT + (response.content ? `\n\nPrevious assistant text before the malformed calls:\n${response.content}` : '') }]; continue; }
+        }
+        break;
+      }
       const executable = response.tool_calls.length && ['tool_calls', 'function_call', 'stop'].includes(response.finish_reason);
       if (executable) {
         const message = assistant(response.content ? stripThink(response.content) : '', response, inputIds(messages), response.tool_calls); messages.push(message);

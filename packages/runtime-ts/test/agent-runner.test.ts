@@ -121,3 +121,10 @@ for (const kind of ['missing', 'zero', 'error', 'mixed'] as const) test(`runner 
   assert.deepEqual({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, total_tokens: usage.totalTokens, request_count: usage.requestCount, reported_tokens: usage.reportedTokens, estimated_tokens: usage.estimatedTokens, context_tokens: usage.contextTokens }, expected.usage);
   assert.equal(result.round_usages.length, responses.length); if (kind === 'error') assert.equal(usage.totalTokens, 0); else assert.ok(usage.estimatedTokens > 0);
 });
+for (const twice of [false, true]) test(`malformed tool names recover within one iteration and usage round: fallback=${twice}`, async () => {
+  const invalid = { ...call(), name: '' }, responses = [frame('attempt one', [invalid], 'tool_calls'), ...(twice ? [frame('attempt two', [invalid], 'tool_calls')] : []), frame('recovered')];
+  const state = setup(responses, { maxIterations: 1 }), result = await new AgentRunner().run(state.spec), expected = await oracle({ responses, max_iterations: 1 }) as { requests: unknown; messages: unknown; usage: unknown };
+  assert.equal(result.final_content, 'recovered'); assert.equal(result.round_usages.length, 1); assert.equal(result.usage?.requestCount, responses.length); assert.equal(state.executed.length, 0);
+  assert.deepEqual(comparable(state.requests), expected.requests); assert.deepEqual(result.messages, expected.messages);
+  const usage = result.usage!; assert.deepEqual({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, total_tokens: usage.totalTokens, request_count: usage.requestCount }, expected.usage);
+});
