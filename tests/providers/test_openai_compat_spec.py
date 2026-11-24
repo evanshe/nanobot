@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -160,23 +162,17 @@ def _fake_chat_stream_reasoning_chunks():
     return _FakeChatStream(_stream())
 
 
+def _tool_stream_fixture() -> dict:
+    path = Path(__file__).parents[2] / "packages/runtime-ts/test/fixtures/openai-chat-tools.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _fake_chat_stream_tool_call_chunks():
     """Mimic OpenAI-compatible streaming tool-call argument deltas."""
 
     async def _stream():
-        yield _chat_chunk({"tool_calls": [{
-            "index": 0,
-            "id": "call_write",
-            "type": "function",
-            "function": {"name": "write_file", "arguments": '{"path":"notes.md","content":"'},
-        }]})
-        yield _chat_chunk({"tool_calls": [{
-            "index": 0,
-            "function": {"arguments": 'line\\n"}'},
-        }]})
-        yield _chat_chunk({}, finish="tool_calls", usage={
-            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-        })
+        for chunk in _tool_stream_fixture()["chunks"]:
+            yield ChatCompletionChunk.model_validate(chunk)
 
     return _FakeChatStream(_stream())
 
@@ -369,17 +365,15 @@ async def test_openai_compat_stream_forwards_tool_call_argument_deltas(
             on_tool_call_delta=on_tool_delta,
         )
 
-    assert deltas == [
-        {
-            "index": 0,
-            "call_id": "call_write",
-            "name": "write_file",
-            "arguments_delta": '{"path":"notes.md","content":"',
-        },
-        {"index": 0, "call_id": "", "name": "", "arguments_delta": 'line\\n"}'},
-    ]
-    assert result.tool_calls[0].name == "write_file"
-    assert result.tool_calls[0].arguments == {"path": "notes.md", "content": "line\n"}
+    expected = _tool_stream_fixture()["expected"]
+    assert deltas == expected["deltas"]
+    assert result.tool_calls[0].id == expected["tool_call"]["id"]
+    assert result.tool_calls[0].name == expected["tool_call"]["name"]
+    assert result.tool_calls[0].arguments == expected["tool_call"]["arguments"]
+    assert result.usage.input_tokens == expected["usage"]["input_tokens"]
+    assert result.usage.output_tokens == expected["usage"]["output_tokens"]
+    assert result.usage.total_tokens == expected["usage"]["total_tokens"]
+    assert result.finish_reason == expected["finish_reason"]
     kwargs = mock_chat.await_args.kwargs
     if provider_name == "zhipu":
         assert kwargs["extra_body"]["tool_stream"] is True

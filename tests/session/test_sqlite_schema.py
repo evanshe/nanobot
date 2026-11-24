@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,27 +13,14 @@ from nanobot.session.sqlite_store import SqliteSessionStore
 
 
 def _session() -> Session:
+    path = Path(__file__).parents[2] / "packages/runtime-ts/test/fixtures/stored-session.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
     return Session(
-        key="chat:extensions",
-        messages=[{"role": "user", "content": "hello", "extension": {"source": "import"}}],
-        metadata={
-            "title": "Extended session",
-            "extension": {"enabled": True},
-            "runtime_checkpoint": {
-                "phase": "final_response", "iteration": 1, "model": "gpt-test",
-                "assistant_message": {"role": "assistant", "content": "checkpoint answer"},
-                "completed_tool_results": [], "pending_tool_calls": [], "extension": {"step": 2},
-            },
-            "pending_user_followups": [{
-                "id": "followup", "sender_id": "user", "chat_id": "extensions", "content": "next",
-                "media": [], "metadata": {}, "extension": True,
-            }],
-        },
-        provider_state=ProviderConversationState(
-            kind="openai_responses", provider="openai", model="gpt-test", version=1,
-            payload={"items": [], "extension": {"cursor": "opaque"}},
-            pending_messages=[{"role": "assistant", "content": "pending", "extension": True}],
-        ),
+        **{key: value for key, value in record.items()
+           if key not in {"provider_state", "created_at", "updated_at"}},
+        created_at=datetime.fromisoformat(record["created_at"]),
+        updated_at=datetime.fromisoformat(record["updated_at"]),
+        provider_state=ProviderConversationState(**record["provider_state"]),
     )
 
 

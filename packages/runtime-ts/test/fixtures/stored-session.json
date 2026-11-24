@@ -1,0 +1,64 @@
+{
+  "key": "chat:extensions",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello",
+      "extension": {
+        "source": "import"
+      }
+    }
+  ],
+  "metadata": {
+    "title": "Extended session",
+    "extension": {
+      "enabled": true
+    },
+    "runtime_checkpoint": {
+      "phase": "final_response",
+      "iteration": 1,
+      "model": "gpt-test",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "checkpoint answer"
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": [],
+      "extension": {
+        "step": 2
+      }
+    },
+    "pending_user_followups": [
+      {
+        "id": "followup",
+        "sender_id": "user",
+        "chat_id": "extensions",
+        "content": "next",
+        "media": [],
+        "metadata": {},
+        "extension": true
+      }
+    ]
+  },
+  "provider_state": {
+    "kind": "openai_responses",
+    "provider": "openai",
+    "model": "gpt-test",
+    "version": 1,
+    "payload": {
+      "items": [],
+      "extension": {
+        "cursor": "opaque"
+      }
+    },
+    "pending_messages": [
+      {
+        "role": "assistant",
+        "content": "pending",
+        "extension": true
+      }
+    ]
+  },
+  "created_at": "2026-01-01T00:00:00",
+  "updated_at": "2026-01-01T00:00:00"
+}
