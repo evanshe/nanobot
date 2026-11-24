@@ -20,3 +20,4 @@ export * from './agent/context.ts';
 export * from './agent/skills.ts';
 export { prepareAgentMessages, normalizeAgentToolResult } from './agent/requests.ts';
 export * from './agent/governor.ts';
+export * from './agent/history.ts';
