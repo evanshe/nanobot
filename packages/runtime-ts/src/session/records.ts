@@ -1,3 +1,4 @@
+import { parseUniqueJson } from './unique-json.ts';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ConfigObject, Json } from '../config/decoder.ts';
@@ -33,13 +34,13 @@ export function addSessionMessage(session: SessionRecord, role: string, content:
 }
 export function parseObject(record: unknown): ConfigObject {
   if (typeof record !== 'string') throw new TypeError('stored session record must be JSON text');
-  const value: unknown = JSON.parse(record);
+  const value: unknown = parseUniqueJson(record);
   if (!object(value)) throw new TypeError('stored session record must be an object');
   return value;
 }
 export function encodeJson(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) => {
-    if (typeof item === 'number' && !Number.isFinite(item)) throw new TypeError('Session JSON numbers must be finite');
+    if (typeof item === 'number' && (!Number.isFinite(item) || Number.isInteger(item) && !Number.isSafeInteger(item))) throw new TypeError('Session JSON numbers must be finite');
     if (item === undefined || typeof item === 'bigint' || typeof item === 'function' || typeof item === 'symbol') throw new TypeError('Session value is not JSON serializable');
     return item;
   });

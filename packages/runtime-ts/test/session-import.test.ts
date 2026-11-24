@@ -75,3 +75,21 @@ test('older checkpoint is preserved in backup without overriding current state; 
   const other = join(directory, 'other'); await mkdir(join(other, 'sessions'), { recursive: true }); const external = join(directory, 'external'); await writeFile(external, legacy()); await symlink(external, join(other, 'sessions/link.jsonl'));
   await assert.rejects(openSessionStore({ workspace: other, sessionsRoot: root }), /migration failed/); assert.equal(await readFile(external, 'utf8'), legacy());
 }));
+
+test('unsafe legacy integers roll back migration and preserve exact authoritative originals', async () => isolated(async (_directory, workspace, root) => {
+  const path = join(workspace, 'sessions/old.jsonl');
+  for (const integer of ['1234567890123456789', '9007199254740992', '-9007199254740992']) {
+    const original = legacy().replace('"metadata":{}', `"metadata":{"integer":${integer}}`);
+    await writeFile(path, original);
+    await assert.rejects(openSessionStore({ workspace, sessionsRoot: root }), /migration failed/);
+    assert.equal(await readFile(path, 'utf8'), original);
+    const oracle = spawnSync(python, ['-c', 'import json,sys;print(str(json.loads(open(sys.argv[1]).readline())["metadata"]["integer"]))', path], { encoding: 'utf8' });
+    assert.equal(oracle.status, 0, oracle.stderr); assert.equal(oracle.stdout.trim(), integer);
+    const location = await SessionLocation.open(workspace, root), driver = await SqliteDriver.open(join(location.sessionsDirectory, 'sessions.sqlite3'));
+    try { assert.equal((await driver.read(snapshot => snapshot.all("SELECT name FROM sqlite_master WHERE type='table'"))).length, 0); }
+    finally { await driver.close(); }
+  }
+  await writeFile(path, legacy().replace('"metadata":{}', '"metadata":{"integer":9007199254740991}'));
+  const opened = await openSessionStore({ workspace, sessionsRoot: root });
+  try { assert.equal((await opened.state.get('websocket:legacy')).metadata.integer, Number.MAX_SAFE_INTEGER); } finally { await opened.close(); }
+}));

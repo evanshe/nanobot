@@ -166,3 +166,16 @@ test('draft merging retains Python boolean/integer JSON equality without rewriti
     assert.equal((await state.read(draft.key))!.metadata.flag, true);
   } finally { await state.close(); }
 }));
+
+test('existing Python large integers reject reads and title edits without altering authoritative JSON', async () => isolated(async directory => {
+  const opened = await open(directory);
+  try {
+    await opened.state.get('chat:large');
+    const script = 'import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); c.execute("UPDATE sessions SET metadata=? WHERE key=?", (json.dumps({"integer":1234567890123456789,"title":"original"}),"chat:large")); c.commit()';
+    const seeded = spawnSync(python, ['-c', script, join(directory, 'sessions.sqlite3')], { encoding: 'utf8' }); assert.equal(seeded.status, 0, seeded.stderr);
+    await assert.rejects(opened.state.get('chat:large'), /safe integer range/);
+    await assert.rejects(opened.state.updateMetadata('chat:large', { title: 'changed' }), /safe integer range/);
+    const inspected = spawnSync(python, ['-c', 'import sqlite3,json,sys; m=json.loads(sqlite3.connect(sys.argv[1]).execute("SELECT metadata FROM sessions WHERE key=?",("chat:large",)).fetchone()[0]); assert m["title"]=="original"; print(str(m["integer"]))', join(directory, 'sessions.sqlite3')], { encoding: 'utf8' });
+    assert.equal(inspected.status, 0, inspected.stderr); assert.equal(inspected.stdout.trim(), '1234567890123456789');
+  } finally { await opened.state.close(); }
+}));

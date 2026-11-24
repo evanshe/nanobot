@@ -32,7 +32,10 @@ export function parseUniqueJson(source: string): Json {
       while (true) { array.push(value()); whitespace(); const separator = source[position++]; if (separator === ']') return array; if (separator !== ',') throw new SyntaxError('Expected JSON comma'); }
     }
     const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(source.slice(position));
-    if (!token) throw new SyntaxError('Expected JSON value'); position += token[0].length; return JSON.parse(token[0]);
+    if (!token) throw new SyntaxError('Expected JSON value'); position += token[0].length;
+    const parsed: Json = JSON.parse(token[0]);
+    if (/^-?\d+$/.test(token[0]) && !Number.isSafeInteger(parsed)) throw new RangeError('Session JSON integer exceeds the supported safe integer range');
+    return parsed;
   };
   const result = value(); whitespace(); if (position !== source.length) throw new SyntaxError('Trailing JSON data'); return result;
 }
