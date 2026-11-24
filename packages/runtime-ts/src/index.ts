@@ -25,3 +25,4 @@ export * from './agent/loop.ts';
 export { persistAgentMessages } from './agent/persistence.ts';
 export * from './security/paths.ts';
 export * from './security/workspace.ts';
+export * from './execution/files.ts';
