@@ -85,3 +85,11 @@ From the repository root, run the reference tests for a batch with `uv run --no-
 uv run --no-sync python -m pytest -q tests/webui/test_gateway_webui_smoke.py \
   -k 'bootstrap_message_and_thread_hydration or restart_restores_a_completed_answer'
 ```
+
+## Batch 0 evidence and review gate
+
+Batch 0 now has shared config and gateway scenarios, deterministic OpenAI-compatible tool argument chunks and expected normalized results, and a stored-session record with fixed timestamps. [Fixture index](../packages/runtime-ts/test/fixtures/README.md) maps each scenario to its Python reference and describes constructing a v1 database using the existing SQL fixture. Existing client-event fixtures remain the source for runtime and wire event examples.
+
+The isolated [managed Node wheel prototype](../packages/runtime-ts/prototype/README.md) passed installed-entry HTTP startup and graceful SIGTERM/SIGINT shutdown on Linux x86_64 with Node 24.22.3 supplied by the wheel, a private unchanged home, and an empty-directory PATH. The Node binary and all generated wheel/venv artifacts remain outside tracked source. The experiment does not establish the other release platforms or SQLite driver gates.
+
+Verification on this batch: the focused Python config, client/notification/import contracts, OpenAI-compatible provider, SQLite schema and storage suites passed 369 cases; the two selected real gateway bootstrap/history and restart scenarios passed. Ruff passed for the touched Python files. The wheel probe passed both signal cases. Stop here for independent batch review; batch 1 may start only after explicit approval.
