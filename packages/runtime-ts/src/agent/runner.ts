@@ -1,6 +1,6 @@
 import { AgentContextGovernor } from './governor.ts';
 import type { AgentContextGovernorOptions, AgentSummaryCheckpoint } from './governor.ts';
-import { pythonJson, normalizeAgentToolResult } from './requests.ts';
+import { pythonJson, normalizeAgentToolResult, estimateAgentPromptBytes, estimateAgentMessageBytes } from './requests.ts';
 export { ContextWindowExceededError, estimateAgentPromptBytes } from './requests.ts';
 import { randomUUID } from 'node:crypto';
 import { object } from '../config/decoder.ts';
@@ -11,6 +11,7 @@ import type { LLMUsage } from '../bus/usage.ts';
 import type { ChatCallbacks, ChatRequest, ChatResponse } from '../provider/chat.ts';
 import type { ChatToolCall, ChatUsage } from '../provider/values.ts';
 import { parseChatToolArguments } from '../provider/values.ts';
+import { stripPythonWhitespace } from './skills.ts';
 import { stripThink } from '../session/records.ts';
 import prompts from './prompts.json' with { type: 'json' };
 
@@ -86,7 +87,7 @@ export class AgentRunner {
       let snapshot: readonly ConfigObject[];
       try { snapshot = await callback(signal); } catch (error) { if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error; return false; }
       signal.throwIfAborted();
-      const accepted = snapshot.filter(row => row.role === 'user' && row.content !== null && row.content !== undefined && (typeof row.content === 'string' ? Boolean(row.content.trim()) : Array.isArray(row.content) ? row.content.length > 0 : true));
+      const accepted = snapshot.filter(row => row.role === 'user' && row.content !== null && row.content !== undefined && (typeof row.content === 'string' ? Boolean(stripPythonWhitespace(row.content)) : Array.isArray(row.content) ? row.content.length > 0 : true));
       if (!accepted.length) return false;
       messages.push(...structuredClone(accepted)); result.had_injections = true; return true;
     };
@@ -110,8 +111,15 @@ export class AgentRunner {
           onToolCallDelta: async delta => events.emit({ kind: 'progress', content: '', toolEvents: [{ ...delta }] }, signal),
         }, signal);
         signal.throwIfAborted(); governor.accept(requestMessages.length, prepared, response, tools); result.summary_checkpoint = governor.summaryCheckpoint;
-        if (response.usage) { const round = usage(response.usage); result.round_usages.push(round); result.usage = result.usage ? addUsage(result.usage, round) : round; }
-        await emit(response.finish_reason === 'error' ? 'failed' : 'completed', response.usage ? usage(response.usage) : null);
+        let round: LLMUsage;
+        if (response.usage && response.usage.total_tokens > 0) round = usage(response.usage);
+        else {
+          const input = response.finish_reason === 'error' ? 0 : Math.max(0, (spec.estimatePromptTokens ?? estimateAgentPromptBytes)(prepared, tools));
+          const output = response.finish_reason === 'error' ? 0 : estimateAgentMessageBytes({ role: 'assistant', content: response.content || '', ...(response.tool_calls.length ? { tool_calls: response.tool_calls.map(agentToolCallMessage) } : {}), ...(response.reasoning_content === null ? {} : { reasoning_content: response.reasoning_content }) });
+          round = { inputTokens: input, outputTokens: output, totalTokens: input + output, cacheReadTokens: null, cacheWriteTokens: null, reportedTokens: 0, estimatedTokens: input + output, generationMs: 0, measuredOutputTokens: 0, ttftMs: 0, timedRequests: 0, contextTokens: response.finish_reason === 'error' ? null : input, requestCount: 1 };
+        }
+        result.round_usages.push(round); result.usage = result.usage ? addUsage(result.usage, round) : round;
+        await emit(response.finish_reason === 'error' ? 'failed' : 'completed', round);
         return structuredClone(response);
       } catch (error) { await emit(signal.aborted ? 'cancelled' : 'failed'); throw error; }
     };

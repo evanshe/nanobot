@@ -15,6 +15,18 @@ export function pythonJson(value: Json): string {
   if (object(value)) return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`).join(', ')}}`;
   return JSON.stringify(value);
 }
+export function estimateAgentMessageBytes(message: ConfigObject): number {
+  const parts: string[] = [], content = message.content;
+  if (typeof content === 'string') parts.push(content);
+  else if (Array.isArray(content)) for (const block of content) {
+    if (object(block) && block.type === 'text') { if (typeof block.text === 'string' && block.text) parts.push(block.text); }
+    else parts.push(pythonJson(block));
+  } else if (content !== null && content !== undefined) parts.push(pythonJson(content));
+  for (const key of ['name', 'tool_call_id']) if (typeof message[key] === 'string' && message[key]) parts.push(message[key]);
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length) parts.push(pythonJson(message.tool_calls));
+  if (typeof message.reasoning_content === 'string' && message.reasoning_content) parts.push(message.reasoning_content);
+  return Math.max(4, Buffer.byteLength(parts.join('\n'), 'utf8') + 4);
+}
 export function estimateAgentPromptBytes(messages: readonly ConfigObject[], tools: readonly ConfigObject[] = []): number {
   const parts: string[] = [];
   for (const msg of messages) {

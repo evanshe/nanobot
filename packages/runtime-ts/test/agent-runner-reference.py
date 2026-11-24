@@ -43,8 +43,8 @@ class SyntheticModel(LLMProvider):
             content=frame.get('content'), reasoning_content=frame.get('reasoning_content'),
             finish_reason=frame.get('finish_reason', 'stop'),
             tool_calls=[ToolCallRequest(**call) for call in frame.get('tool_calls', [])],
-            usage=LLMUsage.reported(**{key: value for key, value in
-                                      (frame.get('usage') or {'input_tokens': 1, 'output_tokens': 1}).items()
+            usage=None if 'usage' in frame and frame['usage'] is None else LLMUsage.reported(**{key: value for key, value in
+                                      (frame.get('usage') if frame.get('usage') is not None else {'input_tokens': 1, 'output_tokens': 1}).items()
                                       if key in {'input_tokens', 'output_tokens', 'total_tokens',
                                                  'cache_read_tokens', 'cache_write_tokens'}}),
         )
@@ -102,7 +102,7 @@ async def main():
                           'usage': None if result.usage is None else {
                               key: getattr(result.usage, key) for key in (
                                   'input_tokens', 'output_tokens', 'total_tokens', 'request_count',
-                              )
+                              ) + (('reported_tokens', 'estimated_tokens', 'context_tokens') if request.get('usage_details') else ())
                           }}))
     except Exception as error:
         print(json.dumps({'exception': type(error).__name__, 'requests': requests, 'executed': executed}))

@@ -112,3 +112,12 @@ test('runner injection callback failures preserve the active request and cancell
   const controller = new AbortController(); state.spec.injectionCallback = async () => { controller.abort(new DOMException('cancel injection', 'AbortError')); throw controller.signal.reason; };
   await assert.rejects(new AgentRunner().run(state.spec, controller.signal), /cancel injection/);
 });
+for (const kind of ['missing', 'zero', 'error', 'mixed'] as const) test(`runner accounts for ${kind} model usage against Python fallback oracle`, async () => {
+  const first = frame(kind === 'error' ? 'synthetic failure' : kind === 'mixed' ? null : 'answer', kind === 'mixed' ? [call()] : [], kind === 'error' ? 'error' : 'stop');
+  first.usage = kind === 'zero' ? { ...first.usage!, input_tokens: 0, output_tokens: 0, total_tokens: 0, reported_tokens: 0, context_tokens: 0 } : null;
+  const responses = kind === 'mixed' ? [first, frame('done')] : [first], state = setup(responses), result = await new AgentRunner().run(state.spec);
+  const expected = await oracle({ responses, usage_details: true }) as { usage: unknown };
+  const usage = result.usage!;
+  assert.deepEqual({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, total_tokens: usage.totalTokens, request_count: usage.requestCount, reported_tokens: usage.reportedTokens, estimated_tokens: usage.estimatedTokens, context_tokens: usage.contextTokens }, expected.usage);
+  assert.equal(result.round_usages.length, responses.length); if (kind === 'error') assert.equal(usage.totalTokens, 0); else assert.ok(usage.estimatedTokens > 0);
+});
