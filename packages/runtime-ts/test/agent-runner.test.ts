@@ -128,3 +128,20 @@ for (const twice of [false, true]) test(`malformed tool names recover within one
   assert.deepEqual(comparable(state.requests), expected.requests); assert.deepEqual(result.messages, expected.messages);
   const usage = result.usage!; assert.deepEqual({ input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, total_tokens: usage.totalTokens, request_count: usage.requestCount }, expected.usage);
 });
+for (const compact of [false, true]) test(`corrected tool calls retain canonical declaration/result without repair prompts: compact=${compact}`, async () => {
+  const responses = [frame('malformed attempt', [{ ...call(), name: '' }], 'tool_calls'), frame('working', [call()], 'tool_calls'), frame('done')];
+  const state = setup(responses, { maxIterations: 2, ...(compact ? { initialMessages: [{ role: 'user', content: 'x'.repeat(600) }], contextWindowTokens: 2056, consolidateHistory: async () => 'synthetic summary' } : {}) });
+  const result = await new AgentRunner().run(state.spec); assert.equal(state.requests.length, 3); assert.equal(state.executed.length, 1);
+  const followup = state.requests[2].messages; assert.equal(followup.filter(row => row.role === 'assistant' && row.tool_calls).length, 1); assert.equal(followup.filter(row => row.role === 'tool' && row.tool_call_id === 'call').length, 1); assert.doesNotMatch(JSON.stringify(followup), /every tool call was malformed|Previous assistant text before the malformed calls/);
+  assert.doesNotMatch(JSON.stringify(result.messages), /every tool call was malformed/); assert.equal(result.final_content, 'done');
+  if (compact) assert.ok(result.summary_checkpoint);
+  else {
+    const expected = await oracle({ responses, max_iterations: 2 }) as { requests: { messages: ConfigObject[] }[]; messages: unknown };
+    assert.deepEqual(comparable(state.requests).slice(0, 2), expected.requests.slice(0, 2));
+    // Python currently retains the corrective user text in its third wire view.
+    // Compare the actual completed work; the explicit TS correction contract
+    // additionally excludes that one-request instruction from later requests.
+    assert.deepEqual(followup.filter(row => row.role === 'assistant' || row.role === 'tool'), expected.requests[2].messages.filter(row => row.role === 'assistant' || row.role === 'tool'));
+    assert.deepEqual(result.messages, expected.messages);
+  }
+});

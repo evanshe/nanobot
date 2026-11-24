@@ -40,16 +40,20 @@ export class AgentContextGovernor {
     return [{ role: 'system', content: archived }, ...prefix];
   }
   async prepare(raw: ConfigObject[], tools: readonly ConfigObject[], signal: AbortSignal): Promise<ConfigObject[]> {
+    return (await this.prepareWithTransient(raw, tools, signal, [])).request;
+  }
+  async prepareWithTransient(raw: ConfigObject[], tools: readonly ConfigObject[], signal: AbortSignal, transient: readonly ConfigObject[]): Promise<{ request: ConfigObject[]; canonical: ConfigObject[] }> {
     signal.throwIfAborted();
     const delta = structuredClone(raw.slice(this.#rawBoundary)), joined = [...structuredClone(this.#accepted), ...delta];
-    const prepared = prepareAgentMessages(joined, this.#options.maxToolResultChars);
-    if (!this.#options.contextWindowTokens) return prepared;
+    const canonical = prepareAgentMessages(joined, this.#options.maxToolResultChars);
+    const prepared = transient.length ? prepareAgentMessages([...canonical, ...transient], this.#options.maxToolResultChars) : canonical;
+    if (!this.#options.contextWindowTokens) return { request: prepared, canonical };
     const estimated = this.#count(prepared, tools), budget = this.inputBudget; let measured = estimated, source = this.#options.estimatePromptTokens ? 'runtime_counter' : 'heuristic';
-    if (this.#lastTools !== null && equal(tools, this.#lastTools) && this.#usageContext !== null) {
+    if (!transient.length && this.#lastTools !== null && equal(tools, this.#lastTools) && this.#usageContext !== null) {
       if (equal(prepared, this.#accepted)) { measured = this.#usageContext; source = 'matching provider usage'; }
       else if (this.#reported > 0 && prepared.length >= this.#accepted.length && equal(prepared.slice(0, this.#accepted.length), this.#accepted) && this.#usageContext > estimated) { measured = this.#usageContext; source = 'prior provider usage plus pending messages'; }
     }
-    if (budget > 0 && measured < budget) return prepared;
+    if (budget > 0 && measured < budget) return { request: prepared, canonical };
     const events = this.#options.events ?? NO_EVENTS, compactionId = randomUUID();
     await events.emit({ kind: 'context_compaction', compactionId, phase: 'started', reason: 'context_pressure' }, signal);
     try {
@@ -58,7 +62,8 @@ export class AgentContextGovernor {
       if (!summary) throw new ContextWindowExceededError(measured, budget, this.#options.sessionKey, source);
       const summaryPrefix = await this.#summaryTranscript(summary);
       const continuation: ConfigObject[] = delta.some(message => message.role === 'user') ? [] : [{ role: 'user', content: SUMMARY_CONTINUATION }];
-      let fitted = prepareAgentMessages([...summaryPrefix, ...continuation, ...delta], this.#options.maxToolResultChars);
+      const fittedCanonical = prepareAgentMessages([...summaryPrefix, ...continuation, ...delta], this.#options.maxToolResultChars);
+      let fitted = transient.length ? prepareAgentMessages([...fittedCanonical, ...transient], this.#options.maxToolResultChars) : fittedCanonical;
       const pendingIds = new Set(delta.filter(message => message.role === 'tool' && message.name === 'read_file').map(message => message.tool_call_id));
       const candidates = fitted.map((message, index) => ({ message, index })).filter(({ message }) => message.role === 'tool' && pendingIds.has(message.tool_call_id) && typeof message.content === 'string' && Buffer.byteLength(message.content) > readNotice.length).sort((a, b) => Buffer.byteLength(String(b.message.content)) - Buffer.byteLength(String(a.message.content)));
       const replacements = new Map<string, string>();
@@ -74,10 +79,11 @@ export class AgentContextGovernor {
       for (const message of raw.slice(this.#rawBoundary)) if (message.role === 'tool' && typeof message.tool_call_id === 'string' && replacements.has(message.tool_call_id)) message.content = replacements.get(message.tool_call_id)!;
       this.#activeSummary = summary; this.#checkpoint = { summary, transcript_boundary: this.#rawBoundary }; this.#usageContext = null;
       await events.emit({ kind: 'context_compaction', compactionId, phase: 'succeeded', reason: 'context_pressure' });
-      return fitted;
+      for (const message of fittedCanonical) if (message.role === 'tool' && typeof message.tool_call_id === 'string' && replacements.has(message.tool_call_id)) message.content = replacements.get(message.tool_call_id)!;
+      return { request: fitted, canonical: fittedCanonical };
     } catch (error) { await events.emit({ kind: 'context_compaction', compactionId, phase: signal.aborted ? 'cancelled' : 'failed', reason: 'context_pressure' }); throw error; }
   }
-  accept(rawBoundary: number, prepared: readonly ConfigObject[], response: ChatResponse, tools: readonly ConfigObject[]): void {
-    this.#accepted = structuredClone([...prepared]); this.#rawBoundary = rawBoundary; this.#usageContext = response.usage?.context_tokens ?? null; this.#reported = response.usage?.reported_tokens ?? 0; this.#lastTools = structuredClone([...tools]);
+  accept(rawBoundary: number, prepared: readonly ConfigObject[], response: ChatResponse, tools: readonly ConfigObject[], usageMatchesCanonical = true): void {
+    this.#accepted = structuredClone([...prepared]); this.#rawBoundary = rawBoundary; this.#usageContext = usageMatchesCanonical ? response.usage?.context_tokens ?? null : null; this.#reported = usageMatchesCanonical ? response.usage?.reported_tokens ?? 0 : 0; this.#lastTools = structuredClone([...tools]);
   }
 }

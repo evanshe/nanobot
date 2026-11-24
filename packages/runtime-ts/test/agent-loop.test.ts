@@ -342,3 +342,15 @@ test('stop acknowledgement rechecks its original generation inside the owner tra
     await runtime.loop.stopSession(old.key); const saved = await runtime.store.state.get(old.key); assert.equal(saved.generation, replacement); assert.match(JSON.stringify(saved.metadata.pending_user_followups), /replacement journal/);
   } finally { await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('a malformed correction followed by a valid tool turn persists once and replays without repair text', async () => isolated(async (directory, agent, builtin) => {
+  const requests: ChatRequest[] = [], responses = [frame('bad', [{ ...toolCall, name: '' }]), frame('working', [toolCall]), frame('done'), frame('next answer')]; responses[0].finish_reason = 'tool_calls';
+  let index = 0, executions = 0; const model: AgentModel = { chatStream: async request => { requests.push(structuredClone(request)); return responses[index++]; } }, tools = registry(); tools.execute = async () => { executions++; return { content: 'actual corrected result', status: 'ok' }; };
+  let runtime = await create(directory, agent, builtin, model, tools);
+  try { assert.equal((await runtime.loop.processDirect('original'))?.content, 'done'); } finally { await runtime.loop.close(); await runtime.store.close(); }
+  runtime = await create(directory, agent, builtin, model, tools);
+  try {
+    await runtime.loop.processDirect('next'); assert.equal(executions, 1);
+    for (const request of [requests[2], requests[3]]) { assert.equal(request.messages.filter(row => row.role === 'assistant' && row.tool_calls).length, 1); assert.equal(request.messages.filter(row => row.role === 'tool' && row.content === 'actual corrected result').length, 1); assert.doesNotMatch(JSON.stringify(request.messages), /every tool call was malformed/); }
+    const saved = await runtime.store.state.get('cli:direct'); assert.equal(saved.messages.filter(row => row.role === 'assistant' && row.tool_calls).length, 1); assert.equal(saved.messages.filter(row => row.role === 'tool').length, 1); assert.doesNotMatch(JSON.stringify(saved.messages), /every tool call was malformed/); assert.equal(saved.metadata.runtime_checkpoint, undefined);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));

@@ -96,9 +96,10 @@ export class AgentRunner {
       const batchSize = phase === 'model_input' ? 0 : 1 + completed.length;
       await spec.onCheckpoint?.(structuredClone({ phase, iteration, model: spec.modelName, assistant_message: message, completed_tool_results: completed, pending_tool_calls: pending, preceding_messages: messages.slice(start, messages.length - batchSize), ...(phase === 'awaiting_tools' || phase === 'model_input' ? {} : { provider_state: null }) }));
     };
-    const invoke = async (requestMessages: ConfigObject[], tools: readonly ConfigObject[], mergeRound?: number, streaming = true): Promise<ChatResponse> => {
+    const invoke = async (requestMessages: ConfigObject[], tools: readonly ConfigObject[], mergeRound?: number, streaming = true, transient: readonly ConfigObject[] = []): Promise<ChatResponse> => {
       signal.throwIfAborted(); lastStreamedContent = '';
-      let prepared = await governor.prepare(requestMessages, tools, signal);
+      const projection = transient.length ? await governor.prepareWithTransient(requestMessages, tools, signal, transient) : null;
+      let prepared = projection?.request ?? await governor.prepare(requestMessages, tools, signal);
       if (spec.prepareRequest) { prepared = await spec.prepareRequest(structuredClone(prepared), structuredClone([...tools]), signal); governor.ensureFits(prepared, tools); }
       const requestId = randomUUID(), ids = inputIds(messages);
       const emit = async (phase: 'started' | 'completed' | 'failed' | 'cancelled', requestUsage: LLMUsage | null = null) => events.emit({ kind: 'model_request', requestId, runId, sequence: ++sequence, phase, requestUsage, usage: result.usage, roundUsages: result.round_usages, contextWindowTokens: spec.contextWindowTokens, responseInputIds: phase === 'started' ? ids : [] });
@@ -110,7 +111,7 @@ export class AgentRunner {
           onThinkingDelta: async content => events.emit({ kind: 'progress', content, reasoning: true, reasoningDelta: true }, signal),
           onToolCallDelta: async delta => events.emit({ kind: 'progress', content: '', toolEvents: [{ ...delta }] }, signal),
         } : undefined, signal);
-        signal.throwIfAborted(); governor.accept(requestMessages.length, prepared, response, tools); result.summary_checkpoint = governor.summaryCheckpoint;
+        signal.throwIfAborted(); governor.accept(requestMessages.length, projection?.canonical ?? prepared, response, tools, !transient.length); result.summary_checkpoint = governor.summaryCheckpoint;
         let round: LLMUsage;
         if (response.usage && response.usage.total_tokens > 0) round = usage(response.usage);
         else {
@@ -131,15 +132,15 @@ export class AgentRunner {
     };
     for (let iteration = 0; iteration < spec.maxIterations; iteration++) {
       signal.throwIfAborted(); await drainInjections();
-      const roundIndex = result.round_usages.length; let requestMessages = messages, response: ChatResponse;
+      const roundIndex = result.round_usages.length, repairPrompts: ConfigObject[] = []; let response: ChatResponse;
       for (let attempt = 0; ; attempt++) {
-        response = await invoke(requestMessages, attempt === 2 ? [] : spec.tools.definitions, attempt ? roundIndex : undefined, attempt !== 2);
+        response = await invoke(messages, attempt === 2 ? [] : spec.tools.definitions, attempt ? roundIndex : undefined, attempt !== 2, repairPrompts);
         const original = response.tool_calls.length, finish = response.finish_reason;
         response.tool_calls = response.tool_calls.filter(call => typeof call.name === 'string' && call.name.length > 0);
         const allDropped = original > 0 && !response.tool_calls.length;
         if (allDropped && ['tool_calls', 'function_call'].includes(finish)) {
           response.finish_reason = 'stop';
-          if (attempt < 2) { requestMessages = [...requestMessages, { role: 'user', content: prompts.MALFORMED_TOOL_CALL_PROMPT + (response.content ? `\n\nPrevious assistant text before the malformed calls:\n${response.content}` : '') }]; continue; }
+          if (attempt < 2) { repairPrompts.push({ role: 'user', content: prompts.MALFORMED_TOOL_CALL_PROMPT + (response.content ? `\n\nPrevious assistant text before the malformed calls:\n${response.content}` : '') }); continue; }
         }
         break;
       }
@@ -201,7 +202,7 @@ export class AgentRunner {
       }
       if (!response.content?.trim() && !['error', 'length', 'refusal', 'content_filter'].includes(response.finish_reason)) {
         if (++empty < 2) continue;
-        response = await invoke([...messages, { role: 'user', content: prompts.FINALIZATION_RETRY_PROMPT }], []);
+        response = await invoke(messages, [], undefined, true, [{ role: 'user', content: prompts.FINALIZATION_RETRY_PROMPT }]);
       }
       const clean = response.content ? stripThink(response.content) : response.content;
       if (response.finish_reason === 'length' && lengths.length < 3) {
@@ -224,7 +225,7 @@ export class AgentRunner {
     const fallback = (spec.maxIterationsMessage ?? prompts.MAX_ITERATIONS.replace('{{ max_iterations }}', String(spec.maxIterations))).replaceAll('{max_iterations}', String(spec.maxIterations));
     let terminal = fallback; let response: ChatResponse = { content: null, reasoning_content: null, tool_calls: [], usage: null, finish_reason: 'stop' };
     if (spec.finalizeOnMaxIterations !== false) {
-      try { response = await invoke([...messages, { role: 'user', content: prompts.BUDGET_EXHAUSTED_FINALIZATION_PROMPT }], []); if (response.finish_reason !== 'error' && !response.tool_calls.length && response.content?.trim()) terminal = stripThink(response.content); }
+      try { response = await invoke(messages, [], undefined, true, [{ role: 'user', content: prompts.BUDGET_EXHAUSTED_FINALIZATION_PROMPT }]); if (response.finish_reason !== 'error' && !response.tool_calls.length && response.content?.trim()) terminal = stripThink(response.content); }
       catch (error) { if (signal.aborted) throw error; }
     }
     result.final_content = lengths.length ? `${lengths.join('').trimEnd()}\n\n${terminal.trimStart()}`.trim() : terminal; appendFinal(terminal, response);
