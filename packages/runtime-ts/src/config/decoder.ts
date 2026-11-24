@@ -10,7 +10,7 @@ type Shape = {
   minimum?: number; maximum?: number; exclusiveMinimum?: number;
   minItems?: number; maxItems?: number;
   'x-model'?: string; 'x-extra'?: string; 'x-aliases'?: string[];
-  'x-output'?: string; 'x-exclude'?: boolean; 'x-omit-null'?: boolean; 'x-strict'?: boolean;
+  'x-env-names'?: string[]; 'x-output'?: string; 'x-exclude'?: boolean; 'x-omit-null'?: boolean; 'x-strict'?: boolean;
 };
 export const rootShape: Shape = contract;
 const definitions: Record<string, Shape> = contract.$defs;

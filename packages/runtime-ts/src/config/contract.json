@@ -3873,6 +3873,9 @@
       "x-aliases": [
         "agents"
       ],
+      "x-env-names": [
+        "NANOBOT_agents"
+      ],
       "x-output": "agents",
       "x-exclude": false,
       "x-omit-null": false,
@@ -3916,6 +3919,9 @@
       "x-aliases": [
         "channels"
       ],
+      "x-env-names": [
+        "NANOBOT_channels"
+      ],
       "x-output": "channels",
       "x-exclude": false,
       "x-omit-null": false,
@@ -3936,6 +3942,9 @@
       "x-aliases": [
         "transcription"
       ],
+      "x-env-names": [
+        "NANOBOT_transcription"
+      ],
       "x-output": "transcription",
       "x-exclude": false,
       "x-omit-null": false,
@@ -3953,6 +3962,9 @@
       "$ref": "#/$defs/ProvidersConfig",
       "x-aliases": [
         "providers"
+      ],
+      "x-env-names": [
+        "NANOBOT_providers"
       ],
       "x-output": "providers",
       "x-exclude": false,
@@ -4485,6 +4497,9 @@
       "x-aliases": [
         "network"
       ],
+      "x-env-names": [
+        "NANOBOT_network"
+      ],
       "x-output": "network",
       "x-exclude": false,
       "x-omit-null": false,
@@ -4497,6 +4512,9 @@
       "$ref": "#/$defs/GatewayConfig",
       "x-aliases": [
         "gateway"
+      ],
+      "x-env-names": [
+        "NANOBOT_gateway"
       ],
       "x-output": "gateway",
       "x-exclude": false,
@@ -4516,6 +4534,9 @@
       "$ref": "#/$defs/ToolsConfig",
       "x-aliases": [
         "tools"
+      ],
+      "x-env-names": [
+        "NANOBOT_tools"
       ],
       "x-output": "tools",
       "x-exclude": false,
@@ -4592,6 +4613,10 @@
       "title": "Modelpresets",
       "type": "object",
       "x-aliases": [
+        "modelPresets",
+        "model_presets"
+      ],
+      "x-env-names": [
         "modelPresets",
         "model_presets"
       ],

@@ -27,19 +27,21 @@ def record(value):
 
 request = json.load(sys.stdin)
 for name in list(os.environ):
-    if name.upper().startswith('NANOBOT_'):
+    if (name.upper().startswith('NANOBOT_')
+            or name.lower().split('__')[0] in {'modelpresets', 'model_presets'}):
         del os.environ[name]
 os.environ.update(request.get('env', {}))
 set_home_path(Path(request['home']) if request.get('home') else None)
 path = Path(request['path'])
 try:
     config = load_config(path)
-    output = {'data': record(config), 'runtimeDataDir': str(config.runtime_data_dir),
+    output = {'data': record(config), 'sourcePath': str(path.expanduser().resolve()), 'runtimeDataDir': str(config.runtime_data_dir),
               'workspacePath': str(config.workspace_path)}
     if request.get('resolve'):
         output['resolved'] = record(resolve_config_env_vars(config, config_path=path))
-    save_config(config, path)
-    output['saved'] = json.loads(path.read_text(encoding='utf-8'))
+    target = path.expanduser().resolve() if request.get('saveAtSource') else path
+    save_config(config, target)
+    output['saved'] = json.loads(target.read_text(encoding='utf-8'))
     print(json.dumps(output))
 except ConfigLoadError as error:
     print(json.dumps({'error': error.kind, 'paths': [list(issue.path) for issue in error.issues]}))

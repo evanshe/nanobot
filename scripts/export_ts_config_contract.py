@@ -54,6 +54,8 @@ def contract():
             aliases = aliases.choices if isinstance(aliases, AliasChoices) else [aliases or name]
             property_schema = node["properties"][aliases[0]]
             property_schema["x-aliases"] = list(dict.fromkeys([*aliases, name]))
+            if model is Config:
+                property_schema["x-env-names"] = list(aliases) if field.validation_alias else [f"NANOBOT_{name}"]
             property_schema["x-output"] = field.serialization_alias or field.alias or name
             property_schema["x-exclude"] = bool(field.exclude)
             property_schema["x-omit-null"] = bool(field.exclude_if and field.exclude_if(None))

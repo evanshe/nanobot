@@ -1,12 +1,12 @@
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, lstat, readlink, rename, stat, unlink } from 'node:fs/promises';
 import { DecodeError, decode, object, rootShape, serialize, shapeOf } from './decoder.ts';
 import type { ConfigObject, Issue, Json } from './decoder.ts';
 import type { ConfigData } from './types.ts';
 export type * from './types.ts';
-import { migrateFile, normalizeInput, normalizeProxy, validateConfig } from './normalize.ts';
+import { migrateFile, normalizeInput, normalizeProxy, quoteUserInfo, validateConfig } from './normalize.ts';
 
 export type { ConfigObject, Issue, Json } from './decoder.ts';
 export class ConfigLoadError extends Error {
@@ -25,17 +25,33 @@ export type ConfigOptions = {
   timezone?: string;
 };
 export function expandUser(path: string, userHome = homedir()): string {
-  return path === '~' ? userHome : path.startsWith('~/') ? join(userHome, path.slice(2)) : path;
+  return path === '~' ? userHome : path.startsWith('~/') ? `${userHome}${sep}${path.slice(2)}` : path;
 }
-async function canonical(path: string): Promise<string> {
-  try { return await realpath(path); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return join(await canonical(dirname(path)), basename(path));
+function absoluteRaw(path: string): string { return isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`; }
+async function canonical(path: string, links = new Set<string>()): Promise<string> {
+  const absolute = absoluteRaw(path), root = parse(absolute).root;
+  let current = root;
+  for (const part of absolute.slice(root.length).split(sep)) {
+    if (!part || part === '.') continue;
+    if (part === '..') { current = dirname(current); continue; }
+    const candidate = join(current, part);
+    let symbolic = false;
+    try { symbolic = (await lstat(candidate)).isSymbolicLink(); }
+    catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+    if (symbolic) {
+      if (links.has(candidate)) throw new Error(`Symlink loop at ${candidate}`);
+      links.add(candidate);
+      try {
+        const target = await readlink(candidate);
+        current = await canonical(isAbsolute(target) ? target : `${current}${sep}${target}`, links);
+      } finally { links.delete(candidate); }
+    } else current = candidate;
   }
+  return current;
 }
 export function getConfigPath(options: ConfigOptions = {}): string {
-  return join(options.home ? resolve(expandUser(options.home, options.userHome)) : join(options.userHome ?? homedir(), '.nanobot'), 'config.json');
+  const home = options.home ? absoluteRaw(expandUser(options.home, options.userHome)) : join(options.userHome ?? homedir(), '.nanobot');
+  return `${home}${sep}config.json`;
 }
 export function mergeMissingDefaults(existing: Json, defaults: Json): Json {
   if (!object(existing) || !object(defaults)) return existing;
@@ -65,11 +81,12 @@ function canonicalKeys(value: Json, schema = rootShape): Json {
 function environmentData(env: Record<string, string | undefined>): ConfigObject {
   const result: ConfigObject = Object.create(null);
   for (const [name, raw] of Object.entries(env).sort(([a], [b]) => a.split('__').length - b.split('__').length)) {
-    if (!name.toUpperCase().startsWith('NANOBOT_') || raw === undefined) continue;
-    const parts = name.slice(8).toLowerCase().split('__');
-    // Settings ignores unrecognized top-level environment variables.
-    const root = Object.entries(rootShape.properties ?? {}).find(([key, field]) => [key, ...(field['x-aliases'] ?? [])].some(alias => alias.toLowerCase() === parts[0]));
+    if (raw === undefined) continue;
+    const rawParts = name.toLowerCase().split('__');
+    // Explicit Pydantic validation aliases replace the prefixed environment name.
+    const root = Object.entries(rootShape.properties ?? {}).find(([, field]) => field['x-env-names']?.some(alias => alias.toLowerCase() === rawParts[0]));
     if (!root) continue;
+    const parts = [root[0], ...rawParts.slice(1)];
     let target = result;
     let schema = rootShape;
     for (let index = 0; index < parts.length; index++) {
@@ -117,7 +134,7 @@ export class Configuration {
 }
 export async function loadConfig(path?: string, options: ConfigOptions = {}): Promise<Configuration> {
   const userHome = options.userHome ?? homedir();
-  const source = resolve(expandUser(path ?? getConfigPath(options), userHome));
+  const source = absoluteRaw(expandUser(path ?? getConfigPath(options), userHome));
   let input: Json = {};
   try {
     const bytes = await readFile(source);
@@ -147,7 +164,7 @@ export async function loadConfig(path?: string, options: ConfigOptions = {}): Pr
     const parsed = decode(data) as ConfigData;
     // Portable workspace default depends on explicit instance selection, never process-global state.
     const inputDefaults = object(data.agents) && object(data.agents.defaults) ? data.agents.defaults : {};
-    if (!('workspace' in inputDefaults) && options.home) parsed.agents.defaults.workspace = join(await canonical(resolve(expandUser(options.home, userHome))), 'workspace');
+    if (!('workspace' in inputDefaults) && options.home) parsed.agents.defaults.workspace = join(await canonical(absoluteRaw(expandUser(options.home, userHome))), 'workspace');
     validateConfig(parsed);
     const oauthSettings: Record<string, string[]> = {};
     const providers = object(data.providers) ? data.providers : {};
@@ -164,14 +181,14 @@ export async function loadConfig(path?: string, options: ConfigOptions = {}): Pr
 const envPattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 export function resolveEnvRefs(value: Json, env: Record<string, string | undefined> = process.env): Json {
   if (typeof value !== 'string') return value;
-  if ([...value.matchAll(envPattern)].some(match => env[match[1]] === undefined)) return '';
+  if ([...value.matchAll(envPattern)].some(match => !Object.hasOwn(env, match[1]) || env[match[1]] === undefined)) return '';
   return value.replace(envPattern, (_, name: string) => env[name]!);
 }
 export function resolveConfigEnvVars(config: Configuration, env: Record<string, string | undefined> = process.env): Configuration {
   const issues: Issue[] = [];
   const check = (value: Json, path: (string | number)[]): void => {
     if (typeof value === 'string') {
-      for (const name of new Set([...value.matchAll(envPattern)].map(match => match[1]))) if (env[name] === undefined) issues.push({ path, message: `Environment variable '${name}' is not set.` });
+      for (const name of new Set([...value.matchAll(envPattern)].map(match => match[1]))) if (!Object.hasOwn(env, name) || env[name] === undefined) issues.push({ path, message: `Environment variable '${name}' is not set.` });
     } else if (Array.isArray(value)) value.forEach((item, index) => check(item, [...path, index]));
     else if (object(value)) for (const [key, item] of Object.entries(value)) check(item, [...path, key]);
   };
@@ -182,12 +199,12 @@ export function resolveConfigEnvVars(config: Configuration, env: Record<string, 
       if (path.join('.') === 'network.proxy') {
         const start = value.indexOf('://') + 3, end = value.lastIndexOf('@');
         const expanded = value.replace(envPattern, (match, name: string, offset: number) => {
-          const raw = env[name]; if (raw === undefined) return match;
-          const quote = (part: string) => encodeURIComponent(part).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+          const raw = Object.hasOwn(env, name) ? env[name] : undefined; if (raw === undefined) return match;
+          const quote = (part: string) => quoteUserInfo(part);
           if (start <= offset && offset < end) {
             if (offset === start && offset + match.length === end) {
               const colon = raw.indexOf(':');
-              const escape = (part: string) => quote(part).replaceAll('%25', '%');
+              const escape = (part: string) => quoteUserInfo(part, '%');
               return colon < 0 ? escape(raw) : `${escape(raw.slice(0, colon))}:${escape(raw.slice(colon + 1))}`;
             }
             return quote(raw);
@@ -196,7 +213,7 @@ export function resolveConfigEnvVars(config: Configuration, env: Record<string, 
         });
         return normalizeProxy(expanded);
       }
-      return value.replace(envPattern, (match, name: string) => env[name] ?? match);
+      return value.replace(envPattern, (match, name: string) => Object.hasOwn(env, name) ? env[name] ?? match : match);
     }
     if (Array.isArray(value)) return value.map((item, index) => visit(item, [...path, index]));
     if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item, [...path, key])]));

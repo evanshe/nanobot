@@ -1,7 +1,12 @@
+import { isIP } from 'node:net';
 import { DecodeError, object, providerNames } from './decoder.ts';
 import type { ConfigObject, Json } from './decoder.ts';
 
-export function normalizeProxy(value: Json): Json {
+export function quoteUserInfo(value: string, safe = ''): string {
+  const encoded = encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return encoded.replace(/%[0-9A-F]{2}/g, escaped => safe.includes(String.fromCharCode(Number.parseInt(escaped.slice(1), 16))) ? String.fromCharCode(Number.parseInt(escaped.slice(1), 16)) : escaped);
+}
+export function normalizeProxy(value: Json, path: (string | number)[] = ['network', 'proxy']): Json {
   if (value === null || value === '') return null;
   if (typeof value !== 'string') return value; // The DTO decoder reports the type error.
   let proxy = value.trim();
@@ -9,9 +14,27 @@ export function normalizeProxy(value: Json): Json {
   if (!proxy.includes('://') && !/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(proxy)) proxy = `http://${proxy}`;
   if (proxy.includes('${')) return proxy;
   try {
-    const parsed = new URL(proxy);
-    if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol) || !parsed.hostname || parsed.port === '0' || parsed.search || parsed.hash || !['', '/'].includes(parsed.pathname) || /\s/.test(proxy)) throw new Error();
-  } catch { throw new DecodeError(['network', 'proxy'], 'Enter an HTTP, HTTPS or SOCKS5 proxy URL'); }
+    // Validate the raw urlsplit-style components: WHATWG URL repairs an empty
+    // authority and dot paths that Python deliberately rejects for proxies.
+    const parts = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/.exec(proxy);
+    if (!parts || !['http', 'https', 'socks5', 'socks5h'].includes(parts[1].toLowerCase()) || !parts[2] || !['', '/'].includes(parts[3]) || parts[4] || parts[5] || /\s/.test(proxy)) throw new Error();
+    const authority = parts[2];
+    const normalized = authority.replace(/[@:#?]/g, '').normalize('NFKC');
+    if (/[/?#@:]/.test(normalized)) throw new Error();
+    const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+    let host: string, port: string;
+    if (hostPort.startsWith('[')) {
+      const bracket = /^\[([^\]]+)\](?::(.*))?$/.exec(hostPort);
+      if (!bracket) throw new Error();
+      host = bracket[1]; port = bracket[2] ?? '';
+      if (isIP(host) !== 6 && !/^v[0-9a-f]+\..+$/i.test(host)) throw new Error();
+    } else {
+      const colon = hostPort.indexOf(':');
+      host = colon < 0 ? hostPort : hostPort.slice(0, colon); port = colon < 0 ? '' : hostPort.slice(colon + 1);
+      if (/[\[\]]/.test(hostPort)) throw new Error();
+    }
+    if (!host || (port && (!/^\d+$/.test(port) || Number(port) === 0 || Number(port) > 65535))) throw new Error();
+  } catch { throw new DecodeError(path, 'Enter an HTTP, HTTPS or SOCKS5 proxy URL'); }
   return proxy;
 }
 function child(parent: ConfigObject, key: string): ConfigObject | undefined {
@@ -68,13 +91,13 @@ export function normalizeInput(data: ConfigObject, timezone: string): void {
     const proxy = section.proxy;
     if (typeof proxy === 'string' && proxy.trim()) {
       if (!explicit) {
-        let address = normalizeProxy(proxy);
+        let address = normalizeProxy(proxy, []);
         const username = section.proxyUsername ?? section.proxy_username;
         const password = section.proxyPassword ?? section.proxy_password;
         if (typeof username === 'string' && username && typeof password === 'string' && password && typeof address === 'string') {
-          if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(address)) throw new DecodeError(['network'], 'Combine the Discord proxy URL and credentials into one full URL environment variable, or set network.proxy before upgrading.');
+          if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(address)) throw new DecodeError([], 'Combine the Discord proxy URL and credentials into one full URL environment variable, or set network.proxy before upgrading.');
           const [scheme, host] = address.split('://');
-          const quote = (value: string) => encodeURIComponent(value).replaceAll('%24', '$').replaceAll('%7B', '{').replaceAll('%7D', '}');
+          const quote = (value: string) => quoteUserInfo(value, '${}');
           address = `${scheme}://${quote(username)}:${quote(password)}@${host.split('@').at(-1)}`;
         }
         addresses.add(address);
