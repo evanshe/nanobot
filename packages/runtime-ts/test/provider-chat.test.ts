@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { OpenAIChatProvider, isTransientChatResponse, resolveChatIdleTimeoutMs } from '@nanobot/runtime';
 import type { ChatRequest, ChatResponse } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-export async function pythonReference(input: object): Promise<{ response: ChatResponse; transient?: boolean; content: string[]; thinking: string[]; tools: object[] }> {
+export async function pythonReference(input: object): Promise<{ response: ChatResponse; transient?: boolean; argument_json?: string[]; content: string[]; thinking: string[]; tools: object[] }> {
   const child = spawn(process.env.NANOBOT_TEST_PYTHON ?? join(root, '.venv/bin/python'), [fileURLToPath(new URL('./provider-reference.py', import.meta.url))], { cwd: root, env: { ...process.env, PYTHONPATH: root } });
   let stdout = '', stderr = ''; child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
   child.stdin.end(JSON.stringify(input)); const [code] = await once(child, 'close'); assert.equal(code, 0, stderr); return JSON.parse(stdout);
@@ -210,4 +210,27 @@ test('empty completion errors and retry text durations match the Python public b
     const reference = await pythonReference({ base, request: synthetic }), response = await new OpenAIChatProvider({ apiBase: base }).chat(synthetic);
     assert.equal(response.retry_after, reference.response.retry_after); assert.equal(response.retry_after, 90);
   }, response => { response.writeHead(429, { 'content-type': 'application/json' }); response.end('{"error":{"message":"try again in 1m30s","code":"rate_limit_exceeded"}}'); });
+});
+test('fresh Chat and split SSE arguments follow Python strip and preserve unsafe integer originals', { timeout: 30_000 }, async () => {
+  for (const argument of ['\uFEFF', '\u00A0{"id":1}\u00A0', '\u0085\u001c', '{"id":1234567890123456789}', '{"nested":[-9007199254740992]}', '{"id":9007199254740991}']) {
+    for (const stream of [false, true]) {
+      await stub(async base => {
+        const reference = await pythonReference({ base, request: synthetic, stream, exact_arguments: true });
+        const provider = new OpenAIChatProvider({ apiBase: base });
+        const response = stream ? await provider.chatStream(synthetic) : await provider.chat(synthetic);
+        if (argument.includes('1234567890123456789') || argument.includes('-9007199254740992')) {
+          assert.equal(response.tool_calls[0].arguments, argument);
+          assert.equal(reference.argument_json?.[0], argument.includes('nested') ? '{"nested": [-9007199254740992]}' : '{"id": 1234567890123456789}');
+        } else assert.deepEqual(response, reference.response);
+        await provider.close();
+      }, response => {
+        const functionCall = { name: 'synthetic_tool', arguments: argument };
+        if (!stream) { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', tool_calls: [{ id: 'call', type: 'function', function: functionCall }] }, finish_reason: 'tool_calls' }] })); }
+        else {
+          const split = Math.floor(argument.length / 2); response.setHeader('content-type', 'text/event-stream');
+          response.end([chunk({ tool_calls: [{ index: 0, id: 'call', function: { ...functionCall, arguments: argument.slice(0, split) } }] }), chunk({ tool_calls: [{ index: 0, function: { arguments: argument.slice(split) } }] }, 'tool_calls')].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
+        }
+      });
+    }
+  }
 });

@@ -47,6 +47,9 @@ async def main():
             'tool_calls': [asdict(call) for call in result.tool_calls],
             'usage': result.usage.to_dict() if result.usage else None,
         }, 'content': content, 'thinking': thinking, 'tools': tools}
+        if request.get('exact_arguments'):
+            output['argument_json'] = [json.dumps(call.arguments, ensure_ascii=False)
+                                       for call in result.tool_calls]
         if result.finish_reason == 'error':
             for name in ('error_status_code', 'error_kind', 'error_type', 'error_code',
                          'error_retry_after_s', 'error_should_retry', 'retry_after'):

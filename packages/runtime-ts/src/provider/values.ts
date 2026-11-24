@@ -12,8 +12,20 @@ export type ChatUsage = {
 export function parseChatToolArguments(value: Json | undefined): Json {
   if (value === undefined || value === null) return {};
   if (typeof value !== 'string') return structuredClone(value);
-  if (!value.trim()) return {};
-  try { const parsed: Json = JSON.parse(value); return parsed === null ? value : parsed; } catch { return value; }
+  // Python str.strip includes NEL/control separators, and excludes BOM.
+  const stripped = value.replace(/^[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/gu, '');
+  if (!stripped) return {};
+  try {
+    const parsed: Json = JSON.parse(stripped, (_key: string, item: unknown, context?: { source?: string }) => {
+      // The original numeric token must be checked before rounding can turn a
+      // Python integer into different executable parameters. Node 24 supplies
+      // reviver source for primitives. Unlike stored records, fresh arguments
+      // fail closed by retaining the original non-executable string.
+      if (typeof item === 'number' && context?.source && /^-?\d+$/.test(context.source) && !Number.isSafeInteger(item)) throw new RangeError('Tool JSON integer exceeds the supported safe integer range');
+      return item;
+    });
+    return parsed === null ? value : parsed;
+  } catch { return value; }
 }
 function pythonJson(value: Json): string {
   if (Array.isArray(value)) return `[${value.map(pythonJson).join(', ')}]`;
