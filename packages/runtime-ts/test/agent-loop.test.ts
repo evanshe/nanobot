@@ -70,7 +70,7 @@ test('a reset during a model request rejects its late checkpoint before any tool
   const tools = registry(); tools.execute = async () => { executed++; return { content: 'never', status: 'ok' }; };
   const runtime = await create(directory, agent, builtin, { chatStream: async () => { started(); await blocked; return frame(null, [toolCall]); } }, tools);
   try {
-    const pending = runtime.loop.processDirect('old generation'); await reached; const old = (await runtime.store.state.get('cli:direct')).generation; await runtime.store.state.reset('cli:direct'); release(); await assert.rejects(pending, /replaced session/);
+    const pending = runtime.loop.processDirect('old generation'); await reached; const old = (await runtime.store.state.get('cli:direct')).generation; await runtime.store.state.reset('cli:direct'); assert.equal(await runtime.loop.stopSession('cli:direct', { expectedGeneration: old }), 0); release(); await assert.rejects(pending, /replaced session/);
     const fresh = await runtime.store.state.get('cli:direct'); assert.notEqual(fresh.generation, old); assert.deepEqual(fresh.messages, []); assert.equal(executed, 0);
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
 }));
@@ -259,4 +259,18 @@ test('failed inbox conversion leaves the entire snapshot available to later orde
     const saved = await runtime.store.state.get('cli:direct'); assert.deepEqual(saved.messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second', 'third']); assert.equal(saved.metadata.pending_user_followups, undefined);
     assert.equal(requests.length, 2); assert.match(String(requests[1].messages.at(-1)?.content), /second\n\nthird/);
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('bus /stop bypasses the session queue, drains active work and emits the structured receipt', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, calls = 0; const reached = new Promise<void>(resolve => { entered = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (_request, _callbacks, signal) => { calls++; entered(); await new Promise<never>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })); throw new Error('unreachable'); } });
+  const intake = new AbortController(), errors: unknown[] = [], running = runtime.loop.run({ signal: intake.signal, onTurnError: error => { errors.push(error); } });
+  try {
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'websocket', chatId: 'stop', senderId: 'user', content: 'first' })); await reached;
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'websocket', chatId: 'stop', senderId: 'user', content: 'queued' }));
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'websocket', chatId: 'stop', senderId: 'user', content: '/stop', metadata: { locale: 'zh-CN' } }));
+    let reply; do { reply = await runtime.bus.consumeOutbound(); } while (reply.event?.kind !== 'command_result');
+    assert.deepEqual(reply.event, { kind: 'command_result', command: '/stop', parts: [{ key: 'stop.done', values: {} }], outcome: 'stopped' }); assert.equal(reply.content, ''); assert.equal(reply.metadata.locale, 'zh-CN');
+    assert.equal(calls, 1); assert.equal(errors.length, 2); const saved = await runtime.store.state.get('websocket:stop'); assert.equal(saved.metadata.pending_user_followups, undefined); assert.equal(saved.metadata.pending_user_turn, undefined);
+    const idle = await runtime.loop.processDirect('/stop', { sessionKey: 'websocket:stop' }); assert.equal(idle?.event?.kind, 'command_result'); assert.equal(calls, 1);
+  } finally { intake.abort(); await running; await runtime.loop.close(); await runtime.store.close(); }
 }));

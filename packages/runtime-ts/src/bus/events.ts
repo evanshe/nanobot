@@ -32,7 +32,7 @@ type EventPayloads<R> = {
   stream_end: { content: string; streamId?: string | null; resuming?: boolean; mergeNext?: boolean };
   streamed_response: Record<never, never>;
   side_channel_reply: { notificationId?: string | null };
-  command_result: { command: string; parts: readonly CommandPart[]; notificationId?: string | null };
+  command_result: { command: string; parts: readonly CommandPart[]; notificationId?: string | null; outcome?: 'stopped' | 'session_reset' | null; switchedPreset?: string | null };
   turn_end: Completion & { contextWindowTokens?: number | null; goalState?: Metadata | null; failureMessage?: string | null };
   goal_status: { status: string; startedAt?: number | null };
   goal_state_sync: { goalState: Metadata };

@@ -98,11 +98,16 @@ export class AgentLoop {
     if (options.cancel !== false) for (const jobs of this.#jobs.values()) for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Agent loop shutdown', options.preserveInflight !== false));
     await this.drain();
   }
-  async stopSession(key: string): Promise<number> {
+  stopSession(key: string, options: { expectedGeneration?: string } = {}): Promise<number> {
+    const task = this.#stopSession(key, options); this.#pending.add(task);
+    const finished = () => this.#pending.delete(task); void task.then(finished, finished); return task;
+  }
+  async #stopSession(key: string, options: { expectedGeneration?: string }): Promise<number> {
     if (this.#closed) throw new Error('Agent loop is closed');
     if (this.#controlling.has(key)) throw new RuntimeBusyError('Session control is active');
     const release = this.#options.bus.admission.activity(); this.#controlling.add(key);
     try {
+      if (options.expectedGeneration !== undefined && (await this.#options.state.readHeader(key))?.generation !== options.expectedGeneration) return 0;
       const jobs = [...this.#jobs.get(key) ?? []]; for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Session stopped', false));
       const before = await this.#options.state.read(key), ids = before ? pendingFollowups(before).map(message => message.metadata._recovery_followup_id).filter((id): id is string => typeof id === 'string') : [];
       await Promise.allSettled(jobs.map(job => job.task));
@@ -159,6 +164,7 @@ export class AgentLoop {
   }
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
+    if (message.isUserInput && message.content.trim() === '/stop') return this.stopSession(key, { expectedGeneration: message.sessionGeneration ?? undefined }).then(() => ({ channel: message.channel, chatId: message.chatId, content: '', metadata: { ...message.metadata }, event: { kind: 'command_result' as const, command: '/stop', parts: [{ key: 'stop.done', values: {} }], outcome: 'stopped' as const } }));
     this.#activeResume.get(key)?.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
     const entry: InboxEntry = { message, ready: Promise.resolve(), started: false, injected: false, durable: false, injectable: options.allowInjection === true && !options.ephemeral && message.isUserInput && !message.content.trimStart().startsWith('/') };
     const task = this.#serial(key, controller => { entry.started = true; return entry.injected && entry.durable ? Promise.resolve(null) : this.#turn(message, { ...captured, signal: controller.signal }); }, options.signal, async () => {
