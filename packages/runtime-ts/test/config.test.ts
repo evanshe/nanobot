@@ -29,6 +29,7 @@ const cases: Scenario[] = [
   { name: 'complex env settings', input: {}, env: { NANOBOT_GATEWAY: '{"port":12345}', NANOBOT_TOOLS__EXEC__ALLOW_PATTERNS: '["safe"]' } },
   { name: 'nested env outranks whole section regardless insertion', input: {}, env: { NANOBOT_GATEWAY__PORT: '12345', NANOBOT_GATEWAY: '{"port":23456}' } },
   { name: 'same env source runtime alias conflict', input: {}, env: { NANOBOT_TOOLS__EXEC__TIMEOUT: '10', NANOBOT_TOOLS__EXEC__MAX_RUNTIME: '20' } },
+  { name: 'missing env is reported before proxy expansion validation', input: { network: { proxy: '${PROXY}' }, tools: { exec: { pathPrepend: '${MISSING_PATH}' } } }, env: { PROXY: 'bad proxy' }, resolve: true },
   { name: 'missing env locations', input: { providers: { groq: { apiKey: '${MISSING}' } } }, resolve: true },
   { name: 'proxy credentials escaped on resolution', input: { network: { proxy: 'http://${USER}:${PASS}@localhost:8080' } }, env: { USER: 'a@b', PASS: 'a/b' }, resolve: true },
   { name: 'new keys precede legacy my keys', input: { tools: { myEnabled: false, mySet: false, my: { enable: true, allowSet: true } } } },

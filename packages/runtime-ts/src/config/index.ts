@@ -169,9 +169,16 @@ export function resolveEnvRefs(value: Json, env: Record<string, string | undefin
 }
 export function resolveConfigEnvVars(config: Configuration, env: Record<string, string | undefined> = process.env): Configuration {
   const issues: Issue[] = [];
-  const visit = (value: Json, path: (string | number)[]): Json => {
+  const check = (value: Json, path: (string | number)[]): void => {
     if (typeof value === 'string') {
       for (const name of new Set([...value.matchAll(envPattern)].map(match => match[1]))) if (env[name] === undefined) issues.push({ path, message: `Environment variable '${name}' is not set.` });
+    } else if (Array.isArray(value)) value.forEach((item, index) => check(item, [...path, index]));
+    else if (object(value)) for (const [key, item] of Object.entries(value)) check(item, [...path, key]);
+  };
+  check(config.data, []);
+  if (issues.length) throw new ConfigLoadError(config.sourcePath, 'missing_env', `Found ${issues.length} missing environment variable reference(s).`, issues);
+  const visit = (value: Json, path: (string | number)[]): Json => {
+    if (typeof value === 'string') {
       if (path.join('.') === 'network.proxy') {
         const start = value.indexOf('://') + 3, end = value.lastIndexOf('@');
         const expanded = value.replace(envPattern, (match, name: string, offset: number) => {
@@ -187,7 +194,7 @@ export function resolveConfigEnvVars(config: Configuration, env: Record<string, 
           }
           return raw;
         });
-        return issues.length ? expanded : normalizeProxy(expanded);
+        return normalizeProxy(expanded);
       }
       return value.replace(envPattern, (match, name: string) => env[name] ?? match);
     }
@@ -196,7 +203,6 @@ export function resolveConfigEnvVars(config: Configuration, env: Record<string, 
     return value;
   };
   const data = visit(config.data, []) as ConfigData;
-  if (issues.length) throw new ConfigLoadError(config.sourcePath, 'missing_env', `Found ${issues.length} missing environment variable reference(s).`, issues);
   if (JSON.stringify(data) === JSON.stringify(config.data)) return config;
   return new Configuration(data, config.sourcePath, config.userHome, config.oauthSettings);
 }
