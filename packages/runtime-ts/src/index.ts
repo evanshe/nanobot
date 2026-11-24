@@ -16,3 +16,5 @@ export type { ChatErrorMetadata } from './provider/errors.ts';
 export { isLocalChatEndpoint } from './provider/endpoint.ts';
 export * from './agent/runner.ts';
 export * from './agent/retry.ts';
+export * from './agent/context.ts';
+export * from './agent/skills.ts';
