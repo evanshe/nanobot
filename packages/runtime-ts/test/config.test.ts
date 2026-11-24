@@ -141,11 +141,13 @@ test('Python source identity follows symlinks before parent components, includin
   await saveConfig(config); assert.deepEqual(JSON.parse(await readFile(config.sourcePath, 'utf8')), expected.saved);
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')), wrong);
   const home = `${link}/..`;
+  await writeFile(join(instance, 'config.json'), JSON.stringify(right));
   const selectedReference = pythonReference({ path, home, env: {}, saveAtSource: true });
   // Remove the saved workspace default so each loader derives it from selected home.
   await writeFile(join(instance, 'config.json'), JSON.stringify(right));
   const selected = await loadConfig(undefined, { home, env: {}, timezone: 'UTC' });
   assert.equal(selected.sourcePath, selectedReference.sourcePath);
+  assert.equal(selected.workspacePath, selectedReference.workspacePath);
   assert.equal(selected.workspacePath, join(instance, 'workspace'));
 }));
 test('dangling source symlink keeps Python ownership and default save follows its missing target', async () => isolated(async directory => {
