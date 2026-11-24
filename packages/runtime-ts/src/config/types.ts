@@ -15,6 +15,7 @@ export type AgentDefaults = {
   "maxToolIterations": number;
   "maxConcurrentSubagents": number;
   "maxToolResultChars": number;
+  "langfuseEnabled": boolean;
   "providerRetryMode": "standard" | "persistent";
   "toolHintMaxLength": number;
   "reasoningEffort": string | null;

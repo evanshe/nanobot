@@ -173,6 +173,19 @@
           "x-omit-null": false,
           "x-strict": false
         },
+        "langfuseEnabled": {
+          "default": true,
+          "title": "Langfuseenabled",
+          "type": "boolean",
+          "x-aliases": [
+            "langfuseEnabled",
+            "langfuse_enabled"
+          ],
+          "x-output": "langfuseEnabled",
+          "x-exclude": false,
+          "x-omit-null": false,
+          "x-strict": false
+        },
         "providerRetryMode": {
           "default": "standard",
           "enum": [
@@ -390,6 +403,7 @@
             "maxToolIterations": 200,
             "maxConcurrentSubagents": 4,
             "maxToolResultChars": 16000,
+            "langfuseEnabled": true,
             "providerRetryMode": "standard",
             "toolHintMaxLength": 40,
             "reasoningEffort": null,
@@ -3894,6 +3908,7 @@
           "maxToolIterations": 200,
           "maxConcurrentSubagents": 4,
           "maxToolResultChars": 16000,
+          "langfuseEnabled": true,
           "providerRetryMode": "standard",
           "toolHintMaxLength": 40,
           "reasoningEffort": null,
