@@ -229,7 +229,14 @@ async function* sseJson(body: ReadableStream<Uint8Array>): AsyncGenerator<Config
         const data = lines.join('\n'); lines = [];
         if (data === '[DONE]') return;
         const parsed: unknown = JSON.parse(data); if (!object(parsed)) throw new TypeError('SSE payload must be an object');
-        if (object(parsed.error)) throw new ChatTransportError(String(parsed.error.message ?? 'Provider stream error'), { payload: parsed });
+        const error = parsed.error;
+        // The SDK checks Python truthiness, so empty dicts/lists are not errors.
+        const hasError = Array.isArray(error) ? error.length > 0 : object(error) ? Object.keys(error).length > 0 : Boolean(error);
+        if (hasError) {
+          const message = object(error) && typeof error.message === 'string' && error.message ? error.message : 'An error occurred during streaming';
+          let payload: unknown = error; if (typeof error === 'string') try { payload = JSON.parse(error); } catch { /* Plain error text has no structured metadata. */ }
+          throw new ChatTransportError(`${message}: ${typeof error === 'string' ? error : JSON.stringify(error)}`, object(payload) ? { payload } : {});
+        }
         yield parsed;
       }
       if (done) break;

@@ -254,3 +254,20 @@ test('local redirect endpoint ranges and hostname handling match the Python IP o
     assert.deepEqual(cases.map(isLocalChatEndpoint), reference.local_endpoints);
   }, response => { response.setHeader('content-type', 'application/json'); response.end('{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}'); });
 });
+test('truthy SSE errors discard finished tool calls while Python-empty error values preserve success', { timeout: 25_000 }, async () => {
+  for (const error of ['upstream failed', 'rate limit', { message: 'synthetic failure', code: 'test' }, {}, [], '', false, null, 0]) {
+    await stub(async base => {
+      const reference = await pythonReference({ base, request: synthetic, stream: true });
+      const provider = new OpenAIChatProvider({ apiBase: base }), deltas: object[] = [];
+      const response = await provider.chatStream(synthetic, { onToolCallDelta: value => { deltas.push(value); } });
+      assert.equal(response.finish_reason, reference.response.finish_reason); assert.deepEqual(deltas, reference.tools);
+      if (reference.response.finish_reason === 'error') {
+        assert.deepEqual(response.tool_calls, []); assert.deepEqual(errorMetadata(response), errorMetadata(reference.response)); assert.equal(isTransientChatResponse(response), reference.transient);
+      } else { assert.deepEqual(response, reference.response); assert.equal(response.tool_calls.length, 1); }
+      await provider.close();
+    }, response => {
+      response.setHeader('content-type', 'text/event-stream');
+      response.end([chunk({ tool_calls: [{ index: 0, id: 'synthetic-call', function: { name: 'synthetic_tool', arguments: '{}' } }] }, 'tool_calls'), { error }].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
+    });
+  }
+});
