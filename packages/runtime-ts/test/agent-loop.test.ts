@@ -354,3 +354,28 @@ test('a malformed correction followed by a valid tool turn persists once and rep
     const saved = await runtime.store.state.get('cli:direct'); assert.equal(saved.messages.filter(row => row.role === 'assistant' && row.tool_calls).length, 1); assert.equal(saved.messages.filter(row => row.role === 'tool').length, 1); assert.doesNotMatch(JSON.stringify(saved.messages), /every tool call was malformed/); assert.equal(saved.metadata.runtime_checkpoint, undefined);
   } finally { await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('same-tick drain close owns the claimed input through a blocked model and final outbound enqueue', { timeout: 6000 }, async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void, closed = false; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => { entered(); await blocked; return frame('accepted answer'); } });
+  try {
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'websocket', chatId: 'handoff', senderId: 'user', content: 'accepted input' }));
+    const running = runtime.loop.run(), closing = runtime.loop.close({ cancel: false }).then(() => { closed = true; });
+    await reached; assert.equal(closed, false); assert.throws(() => runtime.bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+    release(); await closing; await running;
+    let reply; do { reply = await runtime.bus.consumeOutbound(); } while (reply.content !== 'accepted answer');
+    const saved = await runtime.store.state.get('websocket:handoff'); assert.deepEqual(saved.messages.map(row => row.content), ['accepted input', 'accepted answer']); assert.equal(runtime.bus.inboundSize, 0);
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('same-tick close waits for claimed input error cleanup and releases admission exactly once', { timeout: 6000 }, async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void, closed = false, calls = 0; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => { calls++; throw new DOMException('synthetic model failure', 'AbortError'); } });
+  try {
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'websocket', chatId: 'handoff-error', senderId: 'user', content: 'accepted input' }));
+    const running = runtime.loop.run({ onTurnError: async () => { entered(); await blocked; } }), closing = runtime.loop.close({ cancel: false }).then(() => { closed = true; });
+    await reached; assert.equal(calls, 1); assert.equal(closed, false); assert.throws(() => runtime.bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+    release(); await closing; await running; assert.equal(runtime.bus.inboundSize, 0);
+    const saved = await runtime.store.state.get('websocket:handoff-error'); assert.equal(saved.messages[0].content, 'accepted input'); assert.equal(saved.metadata.pending_user_turn, true);
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));

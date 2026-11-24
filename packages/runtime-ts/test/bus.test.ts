@@ -207,3 +207,11 @@ test('normal inbound consume atomically claims work before maintenance can obser
   await assert.rejects(failing, /dispatch failed/);
   bus.admission.pauseIfIdle(() => false)();
 });
+test('synchronous inbound handoff precedes await and a rejected handoff retains the queued message', async () => {
+  const bus = new MessageBus(), message = new InboundMessage(fixture.inbound); await bus.publishInbound(message);
+  let handed = false;
+  const failed = bus.consumeInbound(undefined, claim => { assert.equal(claim.message, message); handed = true; throw new Error('handoff rejected'); });
+  assert.equal(handed, true); assert.equal(bus.inboundSize, 1); await assert.rejects(failed, /handoff rejected/);
+  const claimed = bus.consumeInbound(undefined, claim => { assert.equal(claim.message, message); assert.throws(() => bus.admission.pauseIfIdle(() => false), RuntimeBusyError); return undefined; });
+  assert.equal(bus.inboundSize, 0); (await claimed).release(); bus.admission.pauseIfIdle(() => false)();
+});

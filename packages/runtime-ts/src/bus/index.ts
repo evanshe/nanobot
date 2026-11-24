@@ -32,8 +32,13 @@ export class MessageBus<R = RuntimeReference> {
   async publishInbound(message: InboundMessage): Promise<void> {
     this.admission.check(); this.#inbound.putNowait(message); // No suspension between admission and enqueue.
   }
-  consumeInbound(signal?: AbortSignal): Promise<InboundClaim> {
-    return this.#inbound.claim(message => ({ message, release: this.admission.activity() }), signal);
+  consumeInbound(signal?: AbortSignal, onClaim?: (claim: InboundClaim) => undefined): Promise<InboundClaim> {
+    return this.#inbound.claim(message => {
+      const claim = { message, release: this.admission.activity() };
+      // Handoff is synchronous, before removal/await resumption. Its owner must
+      // retain asynchronous work separately; a failed handoff leaves input queued.
+      try { onClaim?.(claim); return claim; } catch (error) { claim.release(); throw error; }
+    }, signal);
   }
   async withInbound<T>(handle: (message: InboundMessage) => Promise<T> | T, signal?: AbortSignal): Promise<T> {
     const claim = await this.consumeInbound(signal);

@@ -53,7 +53,7 @@ type InboxEntry = { message: InboundMessage; ready: Promise<void>; started: bool
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
   readonly #inboxes = new Map<string, InboxEntry[]>();
-  readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null;
+  readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null; #intakeDone: Promise<void> | null = null;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
   readonly #acceptedGenerations = new WeakMap<AbortController, string>();
   readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, { controller: AbortController; generation: string }>();
@@ -77,27 +77,33 @@ export class AgentLoop {
     if (this.#closed) throw new Error('Agent loop is closed');
     if (this.#intake) throw new RuntimeBusyError('Agent loop intake is already running');
     const controller = new AbortController(), abort = () => controller.abort(options.signal!.reason); this.#intake = controller;
+    let finishIntake!: () => void; const intakeDone = new Promise<void>(resolve => { finishIntake = resolve; }); this.#intakeDone = intakeDone;
     options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) abort();
     try {
       while (!controller.signal.aborted) {
-        let claim;
-        try { claim = await this.#options.bus.consumeInbound(controller.signal); }
-        catch (error) { if (controller.signal.aborted) break; throw error; }
-        // The bus claim remains owned through final outbound enqueue, including
-        // all microtasks between dequeue, turn admission and completion.
-        const message = claim.message;
-        const delivery = this.processMessage(message, { allowInjection: true }).then(async result => { if (result) await this.#options.bus.publishOutbound(result); }).catch(async error => {
-          if (options.onTurnError) await options.onTurnError(error, message);
-          else if (!(error instanceof Error && error.name === 'AbortError')) console.error('Agent turn failed', error);
-        }).finally(() => { claim.release(); this.#deliveries.delete(delivery); });
-        this.#deliveries.add(delivery); void delivery.catch(() => {});
+        try {
+          await this.#options.bus.consumeInbound(controller.signal, claim => {
+            // Register the next owner before dequeue completes, so same-tick
+            // close cannot overtake this accepted claim or its error cleanup.
+            const message = claim.message;
+            const delivery = this.processMessage(message, { allowInjection: true }).then(async result => { if (result) await this.#options.bus.publishOutbound(result); }).catch(async error => {
+              if (options.onTurnError) await options.onTurnError(error, message);
+              else if (!(error instanceof Error && error.name === 'AbortError')) console.error('Agent turn failed', error);
+            }).finally(() => { claim.release(); this.#deliveries.delete(delivery); });
+            this.#deliveries.add(delivery); void delivery.catch(() => {}); return undefined;
+          });
+        } catch (error) { if (controller.signal.aborted) break; throw error; }
       }
-    } finally { options.signal?.removeEventListener('abort', abort); this.#intake = null; await this.drain(); }
+    } finally {
+      options.signal?.removeEventListener('abort', abort); this.#intake = null;
+      try { await this.drain(); } finally { finishIntake(); if (this.#intakeDone === intakeDone) this.#intakeDone = null; }
+    }
   }
   async close(options: { cancel?: boolean; preserveInflight?: boolean } = {}): Promise<void> {
+    const intakeDone = this.#intakeDone;
     this.#closed = true; this.#intake?.abort(new AgentLoopCancellation('Agent loop intake closed', true));
     if (options.cancel !== false) for (const jobs of this.#jobs.values()) for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Agent loop shutdown', options.preserveInflight !== false));
-    await this.drain();
+    await intakeDone; await this.drain();
   }
   stopSession(key: string, options: { expectedGeneration?: string } = {}): Promise<number> {
     const task = this.#stopSession(key, options); this.#pending.add(task);

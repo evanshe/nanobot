@@ -26,3 +26,6 @@ bus.subscribe(forward);
 const typedRuntime = new MessageBus<{ model: string }>();
 typedRuntime.on('turn_runtime_admitted', event => { event.runtime.model.toUpperCase(); });
 void typedRuntime.publish({ kind: 'turn_runtime_admitted', runtime: { model: 'm' }, context: { channel: 'cli', chatId: 'chat', sessionKey: 'cli:chat', metadata: {}, attributes: {}, sessionGeneration: null } });
+// Handoff must register ownership synchronously; an async hook is not accepted.
+// @ts-expect-error asynchronous handoff cannot establish synchronous ownership
+bus.consumeInbound(undefined, async () => {});
