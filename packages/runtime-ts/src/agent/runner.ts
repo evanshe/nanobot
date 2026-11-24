@@ -36,6 +36,8 @@ export type AgentRunSpec = {
   contextWindowTokens?: number; sessionKey?: string; concurrentTools?: boolean; finalizeOnMaxIterations?: boolean;
   maxIterationsMessage?: string; events?: EventSink;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => Promise<void>;
+  injectionCallback?: (signal: AbortSignal) => Promise<readonly ConfigObject[]>;
+  terminalInjectionCallback?: (signal: AbortSignal) => Promise<readonly ConfigObject[]>;
   prepareRequest?: (messages: readonly ConfigObject[], tools: readonly ConfigObject[], signal: AbortSignal) => Promise<ConfigObject[]>;
   governor?: AgentContextGovernor;
   consolidateHistory?: AgentContextGovernorOptions['consolidateHistory']; buildSummaryTranscript?: AgentContextGovernorOptions['buildSummaryTranscript']; acceptedHistoryBoundary?: number; activeSummary?: string | null;
@@ -44,7 +46,7 @@ export type AgentRunSpec = {
 export type AgentRunResult = {
   final_content: string | null; messages: ConfigObject[]; tools_used: string[]; usage: LLMUsage | null; round_usages: LLMUsage[];
   stop_reason: 'completed' | 'max_iterations' | 'empty_final_response' | 'error'; error: string | null;
-  tool_events: ConfigObject[]; summary_checkpoint: AgentSummaryCheckpoint | null;
+  tool_events: ConfigObject[]; had_injections: boolean; summary_checkpoint: AgentSummaryCheckpoint | null;
 };
 export function agentToolCallMessage(call: ChatToolCall): ConfigObject {
   const result: ConfigObject = { id: call.id, type: 'function', function: { name: call.name, arguments: typeof call.arguments === 'string' ? call.arguments : pythonJson(call.arguments) } };
@@ -77,8 +79,17 @@ export class AgentRunner {
   async run(spec: AgentRunSpec, signal = new AbortController().signal): Promise<AgentRunResult> {
     if (!Number.isSafeInteger(spec.maxIterations) || spec.maxIterations < 0 || !Number.isSafeInteger(spec.maxToolResultChars)) throw new RangeError('Runner limits must be integers, with non-negative iteration count');
     const messages = structuredClone([...spec.initialMessages]), start = messages.length, events = spec.events ?? NO_EVENTS;
-    const result: AgentRunResult = { final_content: null, messages, tools_used: [], usage: null, round_usages: [], stop_reason: 'completed', error: null, tool_events: [], summary_checkpoint: null };
+    const result: AgentRunResult = { final_content: null, messages, tools_used: [], usage: null, round_usages: [], stop_reason: 'completed', error: null, tool_events: [], had_injections: false, summary_checkpoint: null };
     const governor = spec.governor ?? new AgentContextGovernor(messages, { ...spec, events });
+    const drainInjections = async (terminal = false): Promise<boolean> => {
+      const callback = terminal ? spec.terminalInjectionCallback : spec.injectionCallback; if (!callback) return false;
+      let snapshot: readonly ConfigObject[];
+      try { snapshot = await callback(signal); } catch (error) { if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw error; return false; }
+      signal.throwIfAborted();
+      const accepted = snapshot.filter(row => row.role === 'user' && row.content !== null && row.content !== undefined && (typeof row.content === 'string' ? Boolean(row.content.trim()) : Array.isArray(row.content) ? row.content.length > 0 : true));
+      if (!accepted.length) return false;
+      messages.push(...structuredClone(accepted)); result.had_injections = true; return true;
+    };
     const runId = randomUUID(), lengths: string[] = []; let sequence = 0, empty = 0, lastStreamedContent = ''; 
     const checkpoint = async (phase: AgentCheckpoint['phase'], iteration: number, message: ConfigObject | null, completed: ConfigObject[] = [], pending: ConfigObject[] = []) => {
       const batchSize = phase === 'model_input' ? 0 : 1 + completed.length;
@@ -110,7 +121,7 @@ export class AgentRunner {
       else messages.push(value);
     };
     for (let iteration = 0; iteration < spec.maxIterations; iteration++) {
-      signal.throwIfAborted(); let response = await invoke(messages, spec.tools.definitions);
+      signal.throwIfAborted(); await drainInjections(); let response = await invoke(messages, spec.tools.definitions);
       response.tool_calls = response.tool_calls.filter(call => typeof call.name === 'string' && call.name.length > 0);
       const executable = response.tool_calls.length && ['tool_calls', 'function_call', 'stop'].includes(response.finish_reason);
       if (executable) {
@@ -184,7 +195,10 @@ export class AgentRunner {
         if (messages.at(-1)?.role !== 'assistant' || messages.at(-1)?.tool_calls) messages.push({ role: 'assistant', content: '[Assistant reply unavailable due to model error.]' });
       } else if (!clean?.trim()) { result.final_content = prompts.EMPTY_FINAL_RESPONSE_MESSAGE; result.stop_reason = 'empty_final_response'; result.error = result.final_content; appendFinal(result.final_content, response); }
       else { result.final_content = lengths.length ? [...lengths, clean].join('').trim() : clean; messages.push(assistant(clean, response, inputIds(messages))); await checkpoint('final_response', iteration, messages.at(-1)!); }
-      await events.emit({ kind: 'stream_end', content: result.final_content || '' }, signal); return result;
+      const resuming = iteration + 1 < spec.maxIterations && (await drainInjections() || (response.finish_reason !== 'error' && await drainInjections(true)));
+      await events.emit({ kind: 'stream_end', content: result.final_content || '', ...(resuming ? { resuming: true } : {}) }, signal);
+      if (resuming) { lengths.length = 0; result.error = null; result.stop_reason = 'completed'; continue; }
+      return result;
     }
     result.stop_reason = 'max_iterations';
     const fallback = (spec.maxIterationsMessage ?? prompts.MAX_ITERATIONS.replace('{{ max_iterations }}', String(spec.maxIterations))).replaceAll('{max_iterations}', String(spec.maxIterations));

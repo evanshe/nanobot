@@ -98,3 +98,17 @@ test('normal runner entry emits model/text/reasoning/tool progress and rejects m
   assert.match(String(result.messages.find(message => message.role === 'tool')?.content), /parameters must be a JSON object/);
   assert.ok(state.events.some(event => event.kind === 'stream_delta' && event.content === 'live')); assert.ok(state.events.some(event => event.kind === 'progress' && event.reasoningDelta));
 });
+for (const boundary of ['before', 'after', 'limit'] as const) test(`runner injection Python request/transcript parity: ${boundary}`, async () => {
+  const injected: ConfigObject[] = [{ role: 'user', content: 'follow one', _meta: { input_id: 'user:one' } }, { role: 'user', content: 'follow two', _meta: { input_id: 'user:two' } }];
+  const script = boundary === 'before' ? [injected, [], []] : [[], injected, []], responses = [frame('first answer'), frame('second answer')]; let cursor = 0;
+  const state = setup(responses, { maxIterations: boundary === 'limit' ? 1 : 3, injectionCallback: async () => script[cursor++] ?? [] });
+  const actual = await new AgentRunner().run(state.spec), expected = await oracle({ responses, max_iterations: state.spec.maxIterations, injections: script }) as { requests: unknown; messages: unknown; final_content: string };
+  assert.deepEqual(comparable(state.requests), expected.requests); assert.deepEqual(actual.messages, expected.messages); assert.equal(actual.final_content, expected.final_content);
+  assert.equal(actual.had_injections, boundary !== 'limit'); if (boundary === 'after') assert.equal(state.events.filter(event => event.kind === 'stream_end' && event.resuming).length, 1);
+});
+test('runner injection callback failures preserve the active request and cancellation still propagates', async () => {
+  const state = setup([frame('answer')], { injectionCallback: async () => { throw new Error('synthetic conversion failure'); } });
+  assert.equal((await new AgentRunner().run(state.spec)).final_content, 'answer');
+  const controller = new AbortController(); state.spec.injectionCallback = async () => { controller.abort(new DOMException('cancel injection', 'AbortError')); throw controller.signal.reason; };
+  await assert.rejects(new AgentRunner().run(state.spec, controller.signal), /cancel injection/);
+});

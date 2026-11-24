@@ -78,6 +78,11 @@ async def main():
     async def consolidate(_messages, _summary):
         return request.get('summary_text')
 
+    injections = iter(request.get('injections', []))
+
+    async def inject():
+        return next(injections, [])
+
     try:
         result = await AgentRunner().run(AgentRunSpec(
             initial_messages=request.get('messages', [{'role': 'user', 'content': 'synthetic input'}]),
@@ -88,6 +93,7 @@ async def main():
             ), max_iterations=request.get('max_iterations', 3), max_tool_result_chars=64,
             finalize_on_max_iterations=request.get('finalize', True),
             checkpoint_callback=checkpoint, consolidate_history=consolidate,
+            injection_callback=inject if "injections" in request else None,
         ))
         print(json.dumps({'final_content': result.final_content, 'messages': result.messages,
                           'stop_reason': result.stop_reason, 'error': result.error,
