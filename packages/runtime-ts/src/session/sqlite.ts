@@ -135,7 +135,7 @@ export class SqliteDriver {
     })();
     return this.#admit(accepted);
   }
-  initializeSchema(): Promise<void> {
+  initializeSchema(afterUpgrade?: (transaction: SqlWrite) => Promise<void>): Promise<void> {
     this.#checkOpen();
     const accepted = this.#tail.then(async () => {
       await rejectSymlink(this.path);
@@ -146,6 +146,13 @@ export class SqliteDriver {
       await all(this.#database, 'PRAGMA journal_mode=WAL');
       await chmod(this.path, 0o600);
       await exec(this.#database, 'BEGIN IMMEDIATE');
+      let active = true;
+      const check = () => { if (!active) throw new Error('SQLite initialization has settled'); };
+      const transaction: SqlWrite = {
+        all: (sql, parameters) => { check(); return all(this.#database, sql, parameters); },
+        run: (sql, parameters) => { check(); return run(this.#database, sql, parameters); },
+        exec: sql => { check(); return exec(this.#database, sql); },
+      };
       try {
         const current = (await all(this.#database, 'PRAGMA user_version'))[0].user_version;
         if (typeof current !== 'number' || current < 0 || current > migrations.length) throw new Error(`unsupported session database schema: ${current}`);
@@ -153,11 +160,12 @@ export class SqliteDriver {
           for (const sql of migration.statements) await exec(this.#database, sql);
           await exec(this.#database, `PRAGMA user_version=${migration.version}`);
         }
+        if (afterUpgrade) await afterUpgrade(transaction);
         await exec(this.#database, 'COMMIT');
       } catch (error) {
         try { await exec(this.#database, 'ROLLBACK'); } catch { /* Preserve the migration failure. */ }
         throw error;
-      }
+      } finally { active = false; }
       // The session owner imports JSONL before setting its one-time marker.
     });
     this.#tail = accepted.then(() => {}, () => {});
