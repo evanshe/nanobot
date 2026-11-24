@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import sqlite3 from 'sqlite3';
 import { test } from 'node:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -158,4 +159,25 @@ test('new input cancels recovery and waits for an uncooperative request before r
     release(); await assert.rejects(recovery, /superseded/); assert.equal((await fresh)?.content, 'fresh answer');
     const saved = await runtime.store.state.get(candidate.key); assert.doesNotMatch(JSON.stringify(saved.messages), /late recovery/); assert.equal(saved.messages.filter(row => row.content === 'actual saved result').length, 1);
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+
+test('shutdown drains an accepted checkpoint blocked by a real SQLite writer before releasing activity', { timeout: 6000 }, async () => isolated(async (directory, agent, builtin) => {
+  let lock!: () => Promise<void>, entered!: () => void, executions = 0; const reached = new Promise<void>(resolve => { entered = resolve; });
+  const tools = registry(); tools.execute = async () => { executions++; return { content: 'never', status: 'ok' }; };
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => { await lock(); return frame(null, [toolCall]); } }, tools);
+  const locker = await new Promise<sqlite3.Database>((resolve, reject) => { const db = new sqlite3.Database(join(runtime.store.location.sessionsDirectory, 'sessions.sqlite3'), error => error ? reject(error) : resolve(db)); });
+  const native = (sql: string) => new Promise<void>((resolve, reject) => locker.exec(sql, error => error ? reject(error) : resolve()));
+  let locked = false; lock = async () => { await native('BEGIN IMMEDIATE'); locked = true; };
+  const checkpoint = runtime.store.state.checkpointView.bind(runtime.store.state);
+  runtime.store.state.checkpointView = (draft, payload, signal) => { const accepted = checkpoint(draft, payload, signal); if (payload.phase === 'awaiting_tools') entered(); return accepted; };
+  try {
+    const task = runtime.loop.processDirect('accepted input'); const rejection = assert.rejects(task, /shutdown/); await reached;
+    let closed = false; const closing = runtime.loop.close().then(() => { closed = true; });
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(closed, false); assert.throws(() => runtime.bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+    await native('COMMIT'); locked = false; await rejection; await closing; assert.equal(executions, 0);
+    const saved = await runtime.store.state.get('cli:direct'); assert.equal((saved.metadata.runtime_checkpoint as ConfigObject).phase, 'tools_completed'); assert.equal(((saved.metadata.runtime_checkpoint as ConfigObject).completed_tool_results as ConfigObject[])[0]._recovery_interrupted, true); assert.equal(saved.metadata.pending_user_turn, true);
+    await runtime.store.close(); const reopened = await openSessionStore({ workspace: agent, sessionsRoot: join(directory, 'node-sessions') });
+    try { const persisted = await reopened.state.get(saved.key); assert.deepEqual(persisted.metadata.runtime_checkpoint, saved.metadata.runtime_checkpoint); assert.equal(persisted.messages[0].content, 'accepted input'); } finally { await reopened.close(); }
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
+  } finally { if (locked) await native('ROLLBACK'); await new Promise<void>((resolve, reject) => locker.close(error => error ? reject(error) : resolve())); await runtime.loop.close(); await runtime.store.close(); }
 }));
