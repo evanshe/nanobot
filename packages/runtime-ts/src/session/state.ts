@@ -1,10 +1,12 @@
+import type { InboundMessage } from '../bus/events.ts';
+import { cloneRecoveryInbound, isSessionMessageInput, recordPendingFollowup, acknowledgePendingFollowups } from './recovery.ts';
 import { object } from '../config/decoder.ts';
 import type { ConfigObject, Json } from '../config/decoder.ts';
 import { HistoryFact, HistoryReader } from './history.ts';
 import { SessionRepository, encodeFacts } from './repository.ts';
 import type { SessionInfo } from './repository.ts';
 import type { SqlRead, SqlWrite } from './sqlite.ts';
-import { DEFAULT_SESSION_POLICY, SessionConflictError, equal, hiddenHistory, localTimestamp, newSession, publicHistoryMessage } from './records.ts';
+import { DEFAULT_SESSION_POLICY, SessionConflictError, encodeJson, equal, hiddenHistory, localTimestamp, newSession, publicHistoryMessage } from './records.ts';
 import type { SessionPolicy, SessionRecord } from './records.ts';
 export class SessionOperationQueueFullError extends Error {
   constructor(capacity: number) { super(`session operation queue is full: capacity=${capacity}`); this.name = 'SessionOperationQueueFullError'; }
@@ -80,6 +82,11 @@ export class SessionState {
     if (this.#snapshots.size > 128) this.#snapshots.delete(this.#snapshots.keys().next().value!);
     if (!value.policy.persist) this.#transients.set(value.key, snapshot);
   }
+  #publishHeader(value: SessionRecord): void {
+    const cached = this.#snapshots.get(value.key);
+    if (cached && cached.revision + 1 === value.revision && cached.generation === value.generation) this.#publish({ ...value, messages: cached.messages });
+    else this.#snapshots.delete(value.key);
+  }
   #draft(value: SessionRecord): SessionRecord {
     const draft = structuredClone(value); draft.consumedFollowupIds = [];
     this.#baselines.set(draft, structuredClone(value)); return draft;
@@ -114,7 +121,7 @@ export class SessionState {
     if (policy.persist) throw new Error('Transient sessions require persist=false');
     return this.#submit([value.key], async () => { this.#retired.delete(value.key); this.#policies.set(value.key, frozen.policy); this.#publish(frozen); return this.#draft(frozen); }, { signal });
   }
-  finishTurn(draft: SessionRecord, signal?: AbortSignal): Promise<void> {
+  #commitDraft(draft: SessionRecord, signal?: AbortSignal): Promise<void> {
     const baseline = this.#baselines.get(draft); if (!baseline) throw new Error('session changes require an owner-issued draft');
     if (draft.key !== baseline.key) throw new SessionConflictError('session key changed');
     const frozen = structuredClone(draft);
@@ -154,6 +161,71 @@ export class SessionState {
       this.#publish(committed); Object.assign(draft, this.#draft(committed)); this.#baselines.set(draft, structuredClone(committed));
     }, { signal });
   }
+  prepareInput(draft: SessionRecord, signal?: AbortSignal): Promise<void> { return this.#commitDraft(draft, signal); }
+  finishTurn(draft: SessionRecord, signal?: AbortSignal): Promise<void> {
+    delete draft.metadata.pending_user_turn; delete draft.metadata.runtime_checkpoint;
+    return this.#commitDraft(draft, signal);
+  }
+  restoreInterruption(draft: SessionRecord, signal?: AbortSignal): Promise<void> { return this.#commitDraft(draft, signal); }
+  checkpointView(draft: SessionRecord, payload: ConfigObject, signal?: AbortSignal): Promise<void> {
+    const baseline = this.#baselines.get(draft), request = structuredClone(payload), provider = structuredClone(draft.providerState);
+    if (!baseline) throw new SessionConflictError('checkpoint requires an owner-issued accepted input');
+    return this.#submit([draft.key], async () => {
+      const committed = await this.#repository.driver.write(async transaction => {
+        const current = await this.#load(transaction, draft.key, false);
+        if (!current) throw new SessionConflictError('checkpoint requires accepted input');
+        if (current.generation !== baseline.generation) throw new SessionConflictError('checkpoint belongs to a replaced session');
+        current.metadata.runtime_checkpoint = request; current.providerState = provider;
+        if (current.policy.persist) {
+          await this.#repository.writeMetadataTo(transaction, current.key, current.metadata); current.revision++;
+          await transaction.run('UPDATE sessions SET provider_state=? WHERE key=?', [provider ? encodeJson(provider) : null, current.key]);
+        } else await this.#save(transaction, current);
+        return current;
+      });
+      if (committed.policy.persist) this.#publishHeader(committed); else this.#publish(committed);
+      draft.metadata.runtime_checkpoint = structuredClone(request);
+      this.#baselines.set(draft, { ...baseline, metadata: { ...baseline.metadata, runtime_checkpoint: structuredClone(request) }, providerState: structuredClone(committed.providerState) });
+    }, { signal });
+  }
+  queueFollowup(key: string, message: InboundMessage, signal?: AbortSignal): Promise<string | null> {
+    if (message.channel !== 'websocket' && !isSessionMessageInput(message)) return Promise.resolve(null);
+    const payload = cloneRecoveryInbound(message);
+    return this.#submit([key], async () => {
+      const committed = await this.#repository.driver.write(async transaction => {
+        let current = await this.#load(transaction, key, false);
+        if (!current) {
+          if (this.#retired.has(key) || payload.requireExistingSession || payload.sessionGeneration !== null) throw new SessionConflictError('follow-up requires an existing session');
+          current = newSession(key); current.policy = this.#policies.get(key) ?? DEFAULT_SESSION_POLICY;
+        }
+        if (payload.sessionGeneration !== null && current.generation !== payload.sessionGeneration) throw new SessionConflictError('follow-up belongs to a replaced session');
+        const id = recordPendingFollowup(current, payload), headerOnly = current.policy.persist && current.persisted;
+        if (headerOnly) { await this.#repository.writeMetadataTo(transaction, key, current.metadata); await transaction.run('UPDATE sessions SET updated_at=? WHERE key=?', [current.updatedAt, key]); current.revision++; }
+        else await this.#save(transaction, current);
+        return { current, id, headerOnly };
+      });
+      if (committed.headerOnly) this.#publishHeader(committed.current); else this.#publish(committed.current);
+      return committed.id;
+    }, { signal });
+  }
+  acknowledgeFollowups(key: string, ids: readonly string[], signal?: AbortSignal): Promise<void> {
+    const frozen = [...ids]; return this.mutateMetadata(key, metadata => acknowledgePendingFollowups({ metadata }, frozen), { signal }).then(() => {});
+  }
+  commitSummary(source: SessionRecord, summary: string, archiveEnd: number, signal?: AbortSignal): Promise<void> {
+    const prefix = structuredClone(source.messages.slice(0, archiveEnd)), generation = source.generation, lastActive = source.updatedAt;
+    return this.#submit([source.key], async () => {
+      const committed = await this.#repository.driver.write(async transaction => {
+        const current = await this.#load(transaction, source.key);
+        if (!current || current.generation !== generation || !equal(current.messages.slice(0, archiveEnd), prefix)) throw new SessionConflictError('summarized history was replaced');
+        const before = current.messages; current.messages = [...before.slice(0, archiveEnd), { role: 'user', content: 'Continue the active task from the working-memory checkpoint above.', _hidden_history: true, timestamp: localTimestamp() }, ...before.slice(archiveEnd)];
+        current.metadata._last_summary = { text: summary, last_active: lastActive }; current.lastArchived = archiveEnd; current.providerState = null;
+        await this.#save(transaction, current, changedStart(before, current.messages)); return current;
+      }); this.#publish(committed);
+    }, { signal });
+  }
+  readMetadata(key: string, signal?: AbortSignal): Promise<ConfigObject | null> { return this.readHeader(key, signal).then(header => header?.metadata ?? null); }
+  recoveryCandidates(prefix: string, signal?: AbortSignal): Promise<[string, boolean][]> {
+    return this.#submit(null, () => this.#repository.driver.read(snapshot => this.#repository.recoveryCandidatesFrom(snapshot, prefix), signal), { signal });
+  }
   mutateMetadata<T>(key: string, change: (metadata: ConfigObject) => T, options: { createIfMissing?: boolean; expectedGeneration?: string; signal?: AbortSignal } = {}): Promise<readonly [T, ConfigObject]> {
     return this.#submit([key], async () => {
       const committed = await this.#repository.driver.write(async transaction => {
@@ -169,9 +241,7 @@ export class SessionState {
       });
       const { current, result, headerOnly } = committed;
       if (headerOnly) {
-        const cached = this.#snapshots.get(key);
-        if (cached && cached.revision + 1 === current.revision && cached.generation === current.generation) this.#publish({ ...current, messages: cached.messages });
-        else this.#snapshots.delete(key);
+        this.#publishHeader(current);
       } else this.#publish(current);
       return [result, structuredClone(current.metadata)];
     }, { signal: options.signal });

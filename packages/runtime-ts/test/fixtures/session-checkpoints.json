@@ -1,0 +1,195 @@
+[
+  {
+    "name": "synchronized final answer",
+    "checkpoint": {
+      "phase": "final_response",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "saved answer",
+        "timestamp": "2026-01-01T00:00:01"
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": []
+    }
+  },
+  {
+    "name": "legacy final answer clears provider state",
+    "checkpoint": {
+      "phase": "final_response",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "saved answer",
+        "timestamp": "2026-01-01T00:00:01"
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": []
+    }
+  },
+  {
+    "name": "uncertain tool outcome",
+    "checkpoint": {
+      "phase": "awaiting_tools",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "",
+        "timestamp": "2026-01-01T00:00:01",
+        "tool_calls": [
+          {
+            "id": "call-a",
+            "type": "function",
+            "function": {
+              "name": "external_write",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": [
+        {
+          "id": "call-a",
+          "type": "function",
+          "function": {
+            "name": "external_write",
+            "arguments": "{}"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "completed tools",
+    "checkpoint": {
+      "phase": "tools_completed",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "",
+        "timestamp": "2026-01-01T00:00:01",
+        "tool_calls": [
+          {
+            "id": "call-a",
+            "type": "function",
+            "function": {
+              "name": "external_write",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      "completed_tool_results": [
+        {
+          "role": "tool",
+          "tool_call_id": "call-a",
+          "content": "saved result",
+          "timestamp": "2026-01-01T00:00:02"
+        }
+      ],
+      "pending_tool_calls": []
+    }
+  },
+  {
+    "name": "synchronized model input with metadata",
+    "checkpoint": {
+      "phase": "model_input",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": null,
+      "completed_tool_results": [],
+      "pending_tool_calls": [],
+      "preceding_messages": [
+        {
+          "role": "user",
+          "content": "next\n\nprivate context",
+          "_meta": {
+            "input_id": "user:follow",
+            "timestamp": "2026-01-01T00:00:02",
+            "runtime_context": {
+              "version": 1,
+              "suffix": "private context"
+            }
+          }
+        }
+      ],
+      "consumed_followup_ids": [
+        "follow-1"
+      ]
+    }
+  },
+  {
+    "name": "missing completed tool is invalid",
+    "checkpoint": {
+      "phase": "tools_completed",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "",
+        "timestamp": "2026-01-01T00:00:01",
+        "tool_calls": [
+          {
+            "id": "call-a",
+            "type": "function",
+            "function": {
+              "name": "external_write",
+              "arguments": "{}"
+            }
+          },
+          {
+            "id": "call-b",
+            "type": "function",
+            "function": {
+              "name": "external_write",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      "completed_tool_results": [
+        {
+          "role": "tool",
+          "tool_call_id": "call-a",
+          "content": "saved result"
+        }
+      ],
+      "pending_tool_calls": []
+    }
+  },
+  {
+    "name": "explicit null prefix is invalid",
+    "checkpoint": {
+      "phase": "final_response",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "saved answer",
+        "timestamp": "2026-01-01T00:00:01"
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": [],
+      "preceding_messages": null
+    }
+  },
+  {
+    "name": "cumulative equal text retains distinct accepted input",
+    "checkpoint": {
+      "phase": "final_response",
+      "provider_state_checkpoint_version": "v1",
+      "assistant_message": {
+        "role": "assistant",
+        "content": "saved answer",
+        "timestamp": "2026-01-01T00:00:01"
+      },
+      "completed_tool_results": [],
+      "pending_tool_calls": [],
+      "preceding_messages": [
+        {
+          "role": "user",
+          "content": "work",
+          "input_id": "second",
+          "timestamp": "2026-01-01T00:00:02"
+        }
+      ]
+    }
+  }
+]

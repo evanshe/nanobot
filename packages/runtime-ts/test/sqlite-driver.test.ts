@@ -46,9 +46,10 @@ test('real long SELECT is natively interrupted within a bounded child process', 
   const path = join(directory, 'sessions.sqlite3'); const driver = await SqliteDriver.open(path);
   try {
     await driver.initializeSchema();
+    await driver.write(transaction => transaction.exec('CREATE TABLE interrupt_peer(value TEXT)'));
     const result = await execute(process.execPath, [fileURLToPath(new URL('./sqlite-cancel-child.ts', import.meta.url)), path], { timeout: 3000 });
     const evidence = JSON.parse(result.stdout);
-    assert.equal(evidence.nativeCode, 'SQLITE_INTERRUPT'); assert.ok(evidence.elapsedMs < 1500, JSON.stringify(evidence));
+    assert.equal(evidence.nativeCode, 'SQLITE_INTERRUPT'); assert.equal(evidence.writeCommitted, true); assert.ok(evidence.elapsedMs < 1500, JSON.stringify(evidence));
     console.log('native interruption evidence', evidence);
     await driver.write(transaction => transaction.exec('CREATE TABLE after_interrupt (value TEXT)'));
   } finally { await driver.close(); }

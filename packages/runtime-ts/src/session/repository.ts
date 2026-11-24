@@ -120,6 +120,20 @@ export class SessionRepository {
     copied.push(new HistoryFact('fork_boundary', {}, { createdAtMs: Date.parse(target.createdAt) }));
     await this.appendHistoryTo(transaction, target.key, encodeFacts(copied).encoded, target.generation); return true;
   }
+  async recoveryCandidatesFrom(snapshot: SqlRead, prefix: string): Promise<[string, boolean][]> {
+    const rows = await snapshot.all(`WITH scan AS (
+      SELECT s.key,s.updated_at,s.rowid AS tie,
+        json_type(s.metadata,'$.pending_user_turn')='true'
+        OR (json_extract(s.metadata,'$.webui_recovery.status') IN ('resuming','awaiting_user','failed') AND json_type(s.metadata,'$.webui_recovery.recovery_id')='text')
+        OR EXISTS(SELECT 1 FROM checkpoints WHERE session_key=s.key)
+        OR EXISTS(SELECT 1 FROM pending_inputs WHERE session_key=s.key AND kind='pending_user_followups') AS journaled,
+        (SELECT CASE WHEN (SELECT e.kind NOT IN ('input','answer','completion') FROM history_entries e WHERE e.session_key=t.session_key AND e.turn_ordinal=t.ordinal AND e.kind NOT IN ('fork_boundary','compaction','model_request') ORDER BY e.position DESC LIMIT 1)
+          THEN 1 ELSE EXISTS(SELECT 1 FROM history_entries e WHERE e.session_key=t.session_key AND e.turn_ordinal=t.ordinal AND json_type(e.record,'$.content.transcript_incomplete')='true') END
+         FROM history_turns t WHERE t.session_key=s.key ORDER BY t.ordinal DESC LIMIT 1) AS unfinished
+      FROM sessions s WHERE s.key GLOB ?)
+      SELECT key,unfinished FROM scan WHERE journaled OR unfinished ORDER BY updated_at DESC,tie`, [`${prefix}*`]);
+    return rows.map(row => [string(row, 'key'), !!row.unfinished]);
+  }
   async archivedKeysFrom(snapshot: SqlRead): Promise<string[]> { return (await snapshot.all('SELECT key FROM session_archives ORDER BY key')).map(row => string(row, 'key')); }
   async setArchivedKeysTo(transaction: SqlWrite, keys: readonly string[]): Promise<string[]> {
     const existing = new Set(await this.archivedKeysFrom(transaction));

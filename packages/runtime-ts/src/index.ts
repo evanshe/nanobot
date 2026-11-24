@@ -8,3 +8,4 @@ export * from './session/state.ts';
 export * from './session/location.ts';
 export { withNamespaceLock, atomicPrivateWrite } from './session/files.ts';
 export * from './session/open.ts';
+export * from './session/recovery.ts';
