@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { AgentLoop, ContextBuilder, MessageBus, RuntimeBusyError, openSessionStore, InboundMessage } from '@nanobot/runtime';
-import type { AgentRuntime, AgentModel, AgentTools, ChatRequest, ChatResponse, ChatToolCall, ConfigObject } from '@nanobot/runtime';
+import type { AgentLoopOptions, AgentRuntime, AgentModel, AgentTools, ChatRequest, ChatResponse, ChatToolCall, ConfigObject } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const definition: ConfigObject = { type: 'function', function: { name: 'echo', description: 'Synthetic output.', parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } } };
 const toolCall: ChatToolCall = { id: 'call', name: 'echo', arguments: { value: 'synthetic' }, extra_content: null, provider_specific_fields: null, function_provider_specific_fields: null };
@@ -18,9 +18,9 @@ async function isolated(run: (directory: string, agent: string, builtin: string)
   try { await mkdir(agent); await mkdir(builtin); await mkdir(join(directory, 'home')); await writeFile(join(agent, 'AGENTS.md'), 'synthetic project rules'); await run(directory, agent, builtin); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 const registry = (): AgentTools => ({ definitions: [definition], validate: (_name, args) => typeof args.value === 'string' ? [] : ['value must be a string'], execute: async () => ({ content: 'synthetic output', status: 'ok' }) });
-async function create(directory: string, agent: string, builtin: string, model: AgentModel, tools = registry()) {
+async function create(directory: string, agent: string, builtin: string, model: AgentModel, tools = registry(), overrides: Partial<AgentLoopOptions> = {}) {
   const store = await openSessionStore({ workspace: agent, sessionsRoot: join(directory, 'node-sessions') }), bus = new MessageBus<AgentRuntime>();
-  const loop = new AgentLoop({ bus, state: store.state, context: new ContextBuilder(agent, { builtinSkillsDirectory: builtin }), dataDirectory: join(directory, 'data'), tools, runtimeForSession: async () => ({ runtimeId: 'synthetic-runtime', modelName: 'synthetic-model', model, maxTokens: 32, temperature: 0.7, contextWindowTokens: 100_000 }), maxIterations: 3, maxToolResultChars: 64, retry: { sleep: async () => {} } });
+  const loop = new AgentLoop({ bus, state: store.state, context: new ContextBuilder(agent, { builtinSkillsDirectory: builtin }), dataDirectory: join(directory, 'data'), tools, runtimeForSession: async () => ({ runtimeId: 'synthetic-runtime', modelName: 'synthetic-model', model, maxTokens: 32, temperature: 0.7, contextWindowTokens: 100_000 }), maxIterations: 3, maxToolResultChars: 64, retry: { sleep: async () => {} }, ...overrides });
   return { store, bus, loop };
 }
 function normalize(value: unknown): unknown {
@@ -226,4 +226,37 @@ test('successful queued websocket inputs acknowledge journal ids only when their
     const saved = await runtime.store.state.get('websocket:journal'); assert.equal(saved.metadata.pending_user_followups, undefined); assert.equal(saved.metadata.pending_user_turn, undefined);
     assert.deepEqual(saved.messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second']);
   } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('busy loop injects a complete ordered input snapshot and commits each journal once', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const requests: ChatRequest[] = [], runtime = await create(directory, agent, builtin, { chatStream: async request => { requests.push(structuredClone(request)); if (requests.length === 1) { entered(); await blocked; return frame('first answer'); } return frame('batch answer'); } });
+  try {
+    const first = runtime.loop.processDirect('first', { channel: 'websocket', sessionKey: 'websocket:inbox' }); await reached;
+    const followups = ['second', 'third'].map(content => runtime.loop.processDirect(content, { channel: 'websocket', sessionKey: 'websocket:inbox', allowInjection: true }));
+    await new Promise(resolve => setImmediate(resolve)); release(); assert.equal((await first)?.content, 'batch answer'); assert.deepEqual(await Promise.all(followups), [null, null]);
+    assert.equal(requests.length, 2); assert.match(String(requests[1].messages.at(-1)?.content), /second\n\nthird/);
+    const saved = await runtime.store.state.get('websocket:inbox'); assert.deepEqual(saved.messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second', 'third']);
+    assert.equal(saved.metadata.pending_user_followups, undefined); assert.equal(saved.messages.filter(row => row.content === 'first answer').length, 1);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('a non-injectable command is a FIFO barrier for later ordinary inputs', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const seen: string[] = [], runtime = await create(directory, agent, builtin, { chatStream: async request => { const content = String(request.messages.at(-1)?.content); seen.push(content); if (seen.length === 1) { entered(); await blocked; } return frame('answer'); } });
+  try {
+    const first = runtime.loop.processDirect('first'); await reached;
+    const command = runtime.loop.processDirect('/synthetic', { allowInjection: true }), later = runtime.loop.processDirect('later', { allowInjection: true });
+    release(); await Promise.all([first, command, later]); assert.deepEqual(seen, ['first', '/synthetic', 'later']);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+
+test('failed inbox conversion leaves the entire snapshot available to later ordered execution', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void, fail = true; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const requests: ChatRequest[] = [], runtime = await create(directory, agent, builtin, { chatStream: async request => { requests.push(structuredClone(request)); if (requests.length === 1) { entered(); await blocked; } return frame('answer'); } }, registry(), { runtimeContext: async message => { if (message.content === 'third' && fail) { fail = false; throw new Error('synthetic conversion failure'); } return []; } });
+  try {
+    const first = runtime.loop.processDirect('first', { channel: 'websocket' }); await reached;
+    const followups = ['second', 'third'].map(content => runtime.loop.processDirect(content, { channel: 'websocket', allowInjection: true }));
+    await new Promise(resolve => setImmediate(resolve)); release(); await first; await Promise.all(followups);
+    const saved = await runtime.store.state.get('cli:direct'); assert.deepEqual(saved.messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second', 'third']); assert.equal(saved.metadata.pending_user_followups, undefined);
+    assert.equal(requests.length, 2); assert.match(String(requests[1].messages.at(-1)?.content), /second\n\nthird/);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
 }));

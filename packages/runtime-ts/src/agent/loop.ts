@@ -16,7 +16,7 @@ import type { AgentRetryOptions } from './retry.ts';
 import { sessionModelHistory } from './history.ts';
 import { persistAgentMessages } from './persistence.ts';
 export type AgentRuntime = Readonly<{ runtimeId: string; modelName: string; model: AgentModel; maxTokens: number; temperature: number; contextWindowTokens: number; reasoningEffort?: string; modelPreset?: string | null }>;
-export type DirectTurnOptions = { ephemeral?: boolean; projectWorkspace?: string; signal?: AbortSignal; policy?: SessionPolicy; enableStreaming?: boolean; publishCompletion?: boolean; publishAcceptance?: boolean };
+export type DirectTurnOptions = { ephemeral?: boolean; projectWorkspace?: string; signal?: AbortSignal; policy?: SessionPolicy; enableStreaming?: boolean; publishCompletion?: boolean; publishAcceptance?: boolean; allowInjection?: boolean };
 export type AgentLoopOptions = {
   bus: MessageBus<AgentRuntime>; state: SessionState; context: ContextBuilder; dataDirectory: string; tools: AgentTools;
   runtimeForSession: (session: SessionRecord, message: InboundMessage) => Promise<AgentRuntime>;
@@ -49,8 +49,10 @@ export class AgentLoopCancellation extends Error {
 const CONTINUATION = 'Continue the interrupted request from the saved conversation context. Do not repeat completed work or mention the restart unless it affects the answer.';
 function recoveryFingerprint(session: SessionRecord): string { return createHash('sha256').update(JSON.stringify({ generation: session.generation, messages: session.messages, metadata: session.metadata })).digest('hex'); }
 export type AgentRecoveryCandidate = { recoveryId: string; canContinue: boolean; key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
+type InboxEntry = { message: InboundMessage; ready: Promise<void>; started: boolean; injected: boolean; durable: boolean; injectable: boolean };
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
+  readonly #inboxes = new Map<string, InboxEntry[]>();
   readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
   readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, AbortController>();
@@ -83,7 +85,7 @@ export class AgentLoop {
         // The bus claim remains owned through final outbound enqueue, including
         // all microtasks between dequeue, turn admission and completion.
         const message = claim.message;
-        const delivery = this.processMessage(message).then(async result => { if (result) await this.#options.bus.publishOutbound(result); }).catch(async error => {
+        const delivery = this.processMessage(message, { allowInjection: true }).then(async result => { if (result) await this.#options.bus.publishOutbound(result); }).catch(async error => {
           if (options.onTurnError) await options.onTurnError(error, message);
           else if (!(error instanceof Error && error.name === 'AbortError')) console.error('Agent turn failed', error);
         }).finally(() => { claim.release(); this.#deliveries.delete(delivery); });
@@ -158,7 +160,14 @@ export class AgentLoop {
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
     this.#activeResume.get(key)?.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
-    return this.#serial(key, controller => this.#turn(message, { ...captured, signal: controller.signal }), options.signal, options.ephemeral ? undefined : async () => { const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id; });
+    const entry: InboxEntry = { message, ready: Promise.resolve(), started: false, injected: false, durable: false, injectable: options.allowInjection === true && !options.ephemeral && message.isUserInput && !message.content.trimStart().startsWith('/') };
+    const task = this.#serial(key, controller => { entry.started = true; return entry.injected && entry.durable ? Promise.resolve(null) : this.#turn(message, { ...captured, signal: controller.signal }); }, options.signal, async () => {
+      const inbox = this.#inboxes.get(key) ?? []; inbox.push(entry); this.#inboxes.set(key, inbox);
+      entry.ready = (async () => { if (!options.ephemeral) { const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id; } })();
+      await entry.ready;
+    });
+    const result = task.finally(() => { const inbox = this.#inboxes.get(key); if (inbox) { const index = inbox.indexOf(entry); if (index >= 0) inbox.splice(index, 1); if (!inbox.length) this.#inboxes.delete(key); } });
+    void result.catch(() => {}); return result;
   }
   async #turn(message: InboundMessage, options: DirectTurnOptions & { resume?: boolean }): Promise<OutboundMessage<AgentRuntime> | null> {
     const { state, bus, context, dataDirectory } = this.#options, key = message.sessionKey, turnId = randomUUID().replaceAll('-', ''), started = performance.now(), signal = options.signal ?? new AbortController().signal;
@@ -195,6 +204,32 @@ export class AgentLoop {
       if (options.publishAcceptance !== false) await this.#publisher.userInputAccepted(message, key);
       await this.#publisher.sessionTurnStarted(message, key); await this.#publisher.turnRuntimeAdmitted(message, key, runtime, turnId); await this.#publisher.runStatusChanged(message, key, 'running', Date.now() / 1000);
       const events = new EventSink(async (event, eventSignal) => { eventSignal?.throwIfAborted(); if (routable(event, message, options.enableStreaming === true)) await bus.publishEvent(event, message.channel, message.chatId, message.metadata); });
+      const injectedEntries = new Map<string, InboxEntry>();
+      const inject = async (): Promise<ConfigObject[]> => {
+        if (ephemeral || message.content.trimStart().startsWith('/')) return [];
+        const snapshot: InboxEntry[] = [];
+        for (const entry of this.#inboxes.get(key) ?? []) {
+          if (entry.started || entry.injected) continue;
+          if (!entry.injectable) break;
+          snapshot.push(entry);
+        }
+        const rows: ConfigObject[] = [];
+        for (const entry of snapshot) {
+          await entry.ready; signal.throwIfAborted();
+          const input = entry.message;
+          if (input.sessionGeneration !== null && input.sessionGeneration !== draft.generation) break;
+          const extra = await this.#options.runtimeContext?.(input, structuredClone(draft)) ?? [];
+          const converted = await context.buildTranscript({ history: [], currentMessage: input.content, currentRole: 'user', media: input.media, runtimeContextBlocks: extra, inputMetadata: inputMetadata(input) }, contextOptions);
+          const row = converted.at(-1)!;
+          const id = typeof input.metadata._recovery_followup_id === 'string' ? input.metadata._recovery_followup_id : randomUUID();
+          row._recovery_followup_id = id; rows.push(row);
+        }
+        signal.throwIfAborted();
+        // Conversion owns a finite snapshot. Nothing is removed/marked until
+        // the entire conversion succeeds, so failures preserve FIFO ownership.
+        for (let index = 0; index < rows.length; index++) { const entry = snapshot[index]; entry.injected = true; injectedEntries.set(String(rows[index]._recovery_followup_id), entry); }
+        return rows;
+      };
       const runnerEvents = events;
       const checkpoint = async (payload: AgentCheckpoint) => {
         const preceding = newSession('checkpoint'); preceding.policy = draft.policy;
@@ -202,14 +237,16 @@ export class AgentLoop {
         const record: ConfigObject = { phase: payload.phase, iteration: payload.iteration, model: payload.model, assistant_message: payload.assistant_message, completed_tool_results: payload.completed_tool_results, pending_tool_calls: payload.pending_tool_calls, preceding_messages: preceding.messages, consumed_followup_ids: [...preceding.consumedFollowupIds] };
         if (Object.hasOwn(payload, 'provider_state')) { record.provider_state_checkpoint_version = 'v1'; draft.providerState = null; }
         await state.checkpointView(draft, record);
+        for (const id of preceding.consumedFollowupIds) { const entry = injectedEntries.get(id); if (entry) entry.durable = true; }
       };
       const model = new RetryingAgentModel(runtime.model, { ...this.#options.retry, events: runnerEvents });
-      const result = await new AgentRunner().run({ initialMessages: transcript, model, modelName: runtime.modelName, tools, maxIterations: this.#options.maxIterations ?? 40, maxToolResultChars: this.#options.maxToolResultChars ?? 65536, maxTokens: runtime.maxTokens, temperature: runtime.temperature, reasoningEffort: runtime.reasoningEffort, contextWindowTokens: runtime.contextWindowTokens, sessionKey: key, events: runnerEvents, onCheckpoint: checkpoint, acceptedHistoryBoundary: 1 + history.length, activeSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? draft.metadata._last_summary.text : null, consolidateHistory: this.#options.consolidateHistory, buildSummaryTranscript: async summary => [{ role: 'system', content: await context.buildSystemPrompt(contextOptions, { text: summary, last_active: localTimestamp() }) }] }, signal);
+      const result = await new AgentRunner().run({ initialMessages: transcript, model, modelName: runtime.modelName, tools, maxIterations: this.#options.maxIterations ?? 40, maxToolResultChars: this.#options.maxToolResultChars ?? 65536, maxTokens: runtime.maxTokens, temperature: runtime.temperature, reasoningEffort: runtime.reasoningEffort, contextWindowTokens: runtime.contextWindowTokens, sessionKey: key, events: runnerEvents, onCheckpoint: checkpoint, injectionCallback: inject, acceptedHistoryBoundary: 1 + history.length, activeSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? draft.metadata._last_summary.text : null, consolidateHistory: this.#options.consolidateHistory, buildSummaryTranscript: async summary => [{ role: 'system', content: await context.buildSystemPrompt(contextOptions, { text: summary, last_active: localTimestamp() }) }] }, signal);
       const latency = Math.max(0, Math.trunc(performance.now() - started)), skip = options.resume ? transcript.length : transcript.length - (early ? 0 : 1);
       const boundaries = await persistAgentMessages(draft, result.messages.slice(skip), { dataDirectory, latencyMs: latency, storeImages: !ephemeral });
       if (!ephemeral && result.usage) draft.metadata._last_usage = usageRecord(result.usage);
       if (!ephemeral) { if (result.stop_reason === 'max_iterations') draft.metadata._stopped_at_iteration_limit = true; else delete draft.metadata._stopped_at_iteration_limit; }
       await state.finishTurn(draft);
+      for (const entry of injectedEntries.values()) entry.durable = true;
       if (!ephemeral && result.summary_checkpoint) {
         const boundary = result.summary_checkpoint.transcript_boundary, archiveEnd = boundary === skip - 1 ? previousCount : boundary >= skip && boundary - skip < boundaries.length ? boundaries[boundary - skip] : null;
         if (archiveEnd !== null) await state.commitSummary(draft, result.summary_checkpoint.summary, archiveEnd);
