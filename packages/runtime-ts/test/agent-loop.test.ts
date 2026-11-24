@@ -181,3 +181,27 @@ test('shutdown drains an accepted checkpoint blocked by a real SQLite writer bef
     const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
   } finally { if (locked) await native('ROLLBACK'); await new Promise<void>((resolve, reject) => locker.close(error => error ? reject(error) : resolve())); await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('bus intake owns dequeue through ordered execution and outbound enqueue without blocking other keys', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const seen: string[] = [], errors: unknown[] = [], runtime = await create(directory, agent, builtin, { chatStream: async request => { const content = String(request.messages.at(-1)?.content); seen.push(content); if (content === 'first') { entered(); await blocked; } return frame(`answer:${content}`); } });
+  const intake = new AbortController();
+  try {
+    await runtime.bus.publishInbound(new InboundMessage({ channel: 'cli', chatId: 'a', senderId: 'user', content: 'first' }));
+    const running = runtime.loop.run({ signal: intake.signal, onTurnError: error => { errors.push(error); } });
+    assert.throws(() => runtime.bus.admission.pauseIfIdle(() => false), RuntimeBusyError); await reached;
+    await assert.rejects(runtime.loop.run(), /already running/);
+    for (const [chatId, content] of [['a', 'second'], ['b', 'other']]) await runtime.bus.publishInbound(new InboundMessage({ channel: 'cli', chatId, senderId: 'user', content }));
+    let other;
+    do { other = await runtime.bus.consumeOutbound(); } while (other.content !== 'answer:other');
+    assert.deepEqual(seen, ['first', 'other']); intake.abort(); release(); await running;
+    assert.deepEqual(seen, ['first', 'other', 'second']); assert.deepEqual(errors, []);
+    assert.deepEqual((await runtime.store.state.get('cli:a')).messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second']);
+    await runtime.bus.drain(); while (runtime.bus.outboundSize) await runtime.bus.consumeOutbound();
+    const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
+  } finally { intake.abort(); release(); await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('closing the loop wakes an empty bus intake and waits for accepted cancellation', async () => isolated(async (directory, agent, builtin) => {
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => frame('unused') });
+  try { const running = runtime.loop.run(); await runtime.loop.close(); await running; assert.equal(runtime.bus.inboundSize, 0); }
+  finally { await runtime.loop.close(); await runtime.store.close(); }
+}));

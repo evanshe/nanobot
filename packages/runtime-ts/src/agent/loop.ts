@@ -51,6 +51,7 @@ function recoveryFingerprint(session: SessionRecord): string { return createHash
 export type AgentRecoveryCandidate = { recoveryId: string; canContinue: boolean; key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
+  readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
   readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, AbortController>();
   readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
@@ -67,9 +68,30 @@ export class AgentLoop {
     });
     const job = { controller, task }; jobs.add(job); this.#tails.set(key, task); this.#pending.add(task); void task.catch(() => {}); return task;
   }
-  async drain(): Promise<void> { while (this.#pending.size) await Promise.allSettled([...this.#pending]); }
+  async drain(): Promise<void> { while (this.#pending.size || this.#deliveries.size) await Promise.allSettled([...this.#pending, ...this.#deliveries]); }
+  async run(options: { signal?: AbortSignal; onTurnError?: (error: unknown, message: InboundMessage) => void | Promise<void> } = {}): Promise<void> {
+    if (this.#closed) throw new Error('Agent loop is closed');
+    if (this.#intake) throw new RuntimeBusyError('Agent loop intake is already running');
+    const controller = new AbortController(), abort = () => controller.abort(options.signal!.reason); this.#intake = controller;
+    options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) abort();
+    try {
+      while (!controller.signal.aborted) {
+        let claim;
+        try { claim = await this.#options.bus.consumeInbound(controller.signal); }
+        catch (error) { if (controller.signal.aborted) break; throw error; }
+        // The bus claim remains owned through final outbound enqueue, including
+        // all microtasks between dequeue, turn admission and completion.
+        const message = claim.message;
+        const delivery = this.processMessage(message).then(async result => { if (result) await this.#options.bus.publishOutbound(result); }).catch(async error => {
+          if (options.onTurnError) await options.onTurnError(error, message);
+          else if (!(error instanceof Error && error.name === 'AbortError')) console.error('Agent turn failed', error);
+        }).finally(() => { claim.release(); this.#deliveries.delete(delivery); });
+        this.#deliveries.add(delivery); void delivery.catch(() => {});
+      }
+    } finally { options.signal?.removeEventListener('abort', abort); this.#intake = null; await this.drain(); }
+  }
   async close(options: { cancel?: boolean; preserveInflight?: boolean } = {}): Promise<void> {
-    this.#closed = true;
+    this.#closed = true; this.#intake?.abort(new AgentLoopCancellation('Agent loop intake closed', true));
     if (options.cancel !== false) for (const jobs of this.#jobs.values()) for (const job of jobs) job.controller.abort(new AgentLoopCancellation('Agent loop shutdown', options.preserveInflight !== false));
     await this.drain();
   }
