@@ -49,23 +49,23 @@ export class AgentLoopCancellation extends Error {
 const CONTINUATION = 'Continue the interrupted request from the saved conversation context. Do not repeat completed work or mention the restart unless it affects the answer.';
 function recoveryFingerprint(session: SessionRecord): string { return createHash('sha256').update(JSON.stringify({ generation: session.generation, messages: session.messages, metadata: session.metadata })).digest('hex'); }
 export type AgentRecoveryCandidate = { recoveryId: string; canContinue: boolean; key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
-type InboxEntry = { message: InboundMessage; ready: Promise<void>; started: boolean; injected: boolean; durable: boolean; injectable: boolean };
+type InboxEntry = { message: InboundMessage; ready: Promise<void>; started: boolean; injected: boolean; durable: boolean; injectable: boolean; rejectedScope: boolean };
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
   readonly #inboxes = new Map<string, InboxEntry[]>();
   readonly #deliveries = new Set<Promise<void>>(); #intake: AbortController | null = null;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
-  readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, AbortController>();
+  readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, { controller: AbortController; generation: string }>();
   readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
   constructor(options: AgentLoopOptions) { this.#options = { ...options }; this.#publisher = new RuntimeEventPublisher(options.bus); }
-  #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal, accept?: () => Promise<unknown>): Promise<T> {
+  #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal, accept?: (controller: AbortController) => Promise<unknown>): Promise<T> {
     if (this.#closed) return Promise.reject(new Error('Agent loop is closed'));
     if (this.#controlling.has(key)) return Promise.reject(new RuntimeBusyError('Session control is active'));
     if (signal?.aborted) return Promise.reject(signal.reason);
     const release = this.#options.bus.admission.activity(), previous = this.#tails.get(key) ?? Promise.resolve(), controller = new AbortController();
     const abort = () => controller.abort(signal!.reason); signal?.addEventListener('abort', abort, { once: true });
     const jobs = this.#jobs.get(key) ?? new Set<{ controller: AbortController; task: Promise<unknown> }>(); this.#jobs.set(key, jobs);
-    const accepted = accept ? Promise.resolve().then(accept) : Promise.resolve(); void accepted.catch(() => {});
+    const accepted = accept ? Promise.resolve().then(() => accept(controller)) : Promise.resolve(); void accepted.catch(() => {});
     const task = previous.catch(() => {}).then(async () => { await accepted; controller.signal.throwIfAborted(); return operation(controller); }).finally(() => {
       signal?.removeEventListener('abort', abort); release(); this.#pending.delete(task); jobs.delete(job); if (!jobs.size) this.#jobs.delete(key); if (this.#tails.get(key) === task) this.#tails.delete(key);
     });
@@ -155,7 +155,7 @@ export class AgentLoop {
       if (!ticket || ticket.id !== options.recoveryId || ticket.fingerprint !== recoveryFingerprint(session)) throw new SessionConflictError('Recovery confirmation is stale or already consumed');
       const checkpoint = session.metadata.runtime_checkpoint;
       if (object(checkpoint) ? !runtimeCheckpointIsWellFormed(checkpoint) || checkpoint.phase === 'final_response' : !session.metadata.pending_user_turn) throw new Error('Recovery cannot continue this checkpoint');
-      this.#tickets.delete(key); this.#activeResume.set(key, controller);
+      this.#tickets.delete(key); this.#activeResume.set(key, { controller, generation: session.generation });
       try {
         return await this.#turn(new InboundMessage({ channel: options.channel ?? 'cli', chatId: options.chatId ?? 'direct', senderId: 'system', content: CONTINUATION, sessionKeyOverride: key, sessionGeneration: session.generation }), { signal: controller.signal, resume: true, publishAcceptance: false, publishCompletion: false });
       } finally { this.#activeResume.delete(key); }
@@ -168,11 +168,21 @@ export class AgentLoop {
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
     if (message.isUserInput && message.content.trim() === '/stop') return this.stopSession(key, { expectedGeneration: message.sessionGeneration ?? undefined }).then(() => ({ channel: message.channel, chatId: message.chatId, content: '', metadata: { ...message.metadata }, event: { kind: 'command_result' as const, command: '/stop', parts: [{ key: 'stop.done', values: {} }], outcome: 'stopped' as const } }));
-    this.#activeResume.get(key)?.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
-    const entry: InboxEntry = { message, ready: Promise.resolve(), started: false, injected: false, durable: false, injectable: options.allowInjection === true && !options.ephemeral && message.isUserInput && !message.content.trimStart().startsWith('/') };
-    const task = this.#serial(key, controller => { entry.started = true; return entry.injected && entry.durable ? Promise.resolve(null) : this.#turn(message, { ...captured, signal: controller.signal }); }, options.signal, async () => {
+    const entry: InboxEntry = { message, ready: Promise.resolve(), started: false, injected: false, durable: false, rejectedScope: false, injectable: options.allowInjection === true && !options.ephemeral && message.isUserInput && !message.content.trimStart().startsWith('/') };
+    const task = this.#serial(key, controller => { entry.started = true; return entry.rejectedScope || entry.injected && entry.durable ? Promise.resolve(null) : this.#turn(message, { ...captured, signal: controller.signal }); }, options.signal, async controller => {
       const inbox = this.#inboxes.get(key) ?? []; inbox.push(entry); this.#inboxes.set(key, inbox);
-      entry.ready = (async () => { if (!options.ephemeral) { const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id; } })();
+      entry.ready = (async () => {
+        if (options.ephemeral) return;
+        const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id;
+        const header = await this.#options.state.readHeader(key); controller.signal.throwIfAborted();
+        if (message.sessionGeneration !== null && header?.generation !== message.sessionGeneration || message.requireExistingSession && !header) { entry.rejectedScope = true; return; }
+        // Only accepted input in this exact durable generation can supersede
+        // recovery. Pre-cancellation, rejected scope and failed journals leave
+        // the recovery owner and its persisted interruption untouched.
+        if (header) message.sessionGeneration = header.generation;
+        const recovery = this.#activeResume.get(key);
+        if (message.isUserInput && recovery && header?.generation === recovery.generation) recovery.controller.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
+      })();
       await entry.ready;
     });
     const result = task.finally(() => { const inbox = this.#inboxes.get(key); if (inbox) { const index = inbox.indexOf(entry); if (index >= 0) inbox.splice(index, 1); if (!inbox.length) this.#inboxes.delete(key); } });

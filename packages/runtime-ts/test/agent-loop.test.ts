@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { AgentLoop, ContextBuilder, MessageBus, RuntimeBusyError, openSessionStore, InboundMessage } from '@nanobot/runtime';
+import { AgentLoop, ContextBuilder, MessageBus, RuntimeBusyError, SqliteDriver, openSessionStore, InboundMessage } from '@nanobot/runtime';
 import type { AgentLoopOptions, AgentRuntime, AgentModel, AgentTools, ChatRequest, ChatResponse, ChatToolCall, ConfigObject } from '@nanobot/runtime';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const definition: ConfigObject = { type: 'function', function: { name: 'echo', description: 'Synthetic output.', parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } } };
@@ -150,12 +150,13 @@ test('recovery tickets reject changed content, stale generations and final-respo
   } finally { await runtime.loop.close(); await runtime.store.close(); }
 }));
 test('new input cancels recovery and waits for an uncooperative request before reading its draft', async () => isolated(async (directory, agent, builtin) => {
-  let entered!: () => void, release!: () => void, count = 0; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
-  const runtime = await create(directory, agent, builtin, { chatStream: async request => { if (++count === 1) { entered(); await blocked; return frame('late recovery'); } assert.match(JSON.stringify(request.messages), /actual saved result/); return frame('fresh answer'); } });
+  let entered!: () => void, release!: () => void, cancelled!: () => void, count = 0; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const cancellation = new Promise<void>(resolve => { cancelled = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (request, _callbacks, signal) => { if (++count === 1) { signal!.addEventListener('abort', cancelled, { once: true }); entered(); await blocked; return frame('late recovery'); } assert.match(JSON.stringify(request.messages), /actual saved result/); return frame('fresh answer'); } });
   try {
     const generation = await seedCheckpoint(runtime), [candidate] = await runtime.loop.scanRecovery();
     const recovery = runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true }); await reached;
-    const fresh = runtime.loop.processDirect('fresh input', { sessionKey: candidate.key }); await new Promise(resolve => setImmediate(resolve)); assert.equal(count, 1);
+    const fresh = runtime.loop.processDirect('fresh input', { sessionKey: candidate.key }); await cancellation; assert.equal(count, 1);
     release(); await assert.rejects(recovery, /superseded/); assert.equal((await fresh)?.content, 'fresh answer');
     const saved = await runtime.store.state.get(candidate.key); assert.doesNotMatch(JSON.stringify(saved.messages), /late recovery/); assert.equal(saved.messages.filter(row => row.content === 'actual saved result').length, 1);
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
@@ -291,4 +292,26 @@ test('an immediate stop drains accepted journal admissions before acknowledging 
     const outcomes = await Promise.allSettled(inputs); assert.ok(outcomes.every(item => item.status === 'rejected')); await stopped;
     const saved = await runtime.store.state.get('websocket:immediate'); assert.equal(saved.metadata.pending_user_followups, undefined); assert.deepEqual(saved.messages, []); assert.equal(calls, 0);
   } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+
+for (const reason of ['pre-cancelled', 'old-generation', 'failed-journal'] as const) test(`rejected input cannot cancel confirmed recovery: ${reason}`, async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void, modelSignal!: AbortSignal; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (_request, _callbacks, signal) => { modelSignal = signal!; entered(); await blocked; return frame('late'); } });
+  const external = new AbortController();
+  try {
+    const generation = await seedCheckpoint(runtime), [candidate] = await runtime.loop.scanRecovery();
+    if (reason === 'failed-journal') {
+      const driver = await SqliteDriver.open(join(runtime.store.location.sessionsDirectory, 'sessions.sqlite3'));
+      try { await driver.write(transaction => transaction.exec("CREATE TRIGGER reject_synthetic_journal BEFORE INSERT ON pending_inputs WHEN NEW.record LIKE '%rejected-journal%' BEGIN SELECT RAISE(ABORT, 'synthetic journal rejected'); END")); } finally { await driver.close(); }
+    }
+    const recovery = runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true, signal: external.signal }); await reached;
+    const preCancelled = new AbortController(); preCancelled.abort(new DOMException('pre-cancelled input', 'AbortError'));
+    const input = runtime.loop.processMessage(new InboundMessage({ channel: reason === 'failed-journal' ? 'websocket' : 'cli', chatId: 'recover', senderId: 'user', sessionKeyOverride: candidate.key, sessionGeneration: reason === 'old-generation' ? 'obsolete-generation' : generation, content: reason === 'failed-journal' ? 'rejected-journal' : 'rejected input' }), { signal: reason === 'pre-cancelled' ? preCancelled.signal : undefined });
+    const observed = input.then(value => ({ value }), error => ({ error }));
+    await new Promise(resolve => setImmediate(resolve)); await runtime.store.state.readHeader(candidate.key); assert.equal(modelSignal.aborted, false);
+    external.abort(new DOMException('preserve original recovery', 'AbortError')); release(); await assert.rejects(recovery, /preserve original recovery/);
+    const outcome = await observed; if (reason === 'old-generation') assert.deepEqual(outcome, { value: null }); else assert.ok('error' in outcome);
+    const saved = await runtime.store.state.get(candidate.key); assert.equal(saved.metadata.pending_user_turn, true); assert.equal(saved.messages.filter(row => row.content === 'actual saved result').length, 1); assert.doesNotMatch(JSON.stringify(saved.messages), /rejected input|rejected-journal/);
+    const remaining = await runtime.loop.scanRecovery(); assert.equal(remaining.length, 1); assert.equal(remaining[0].canContinue, true);
+  } finally { external.abort(); release(); await runtime.loop.close(); await runtime.store.close(); }
 }));
