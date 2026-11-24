@@ -32,10 +32,15 @@ function presentInt(value: Json | undefined): number | null {
   const number = typeof value === 'number' ? Math.trunc(value) : typeof value === 'string' && /^[+-]?\d+$/.test(value.trim()) ? Number(value) : NaN;
   return Number.isSafeInteger(number) ? number : null;
 }
+function usageCounter(value: Json | undefined): number {
+  if (value === null || value === undefined || value === false || value === '' || Array.isArray(value) && !value.length || object(value) && !Object.keys(value).length) return 0;
+  if (value === true) return 1;
+  const parsed = presentInt(value); if (parsed === null) throw new TypeError('Invalid provider token count'); return parsed;
+}
 export function chatUsage(payload: ConfigObject): ChatUsage | null {
   if (!object(payload.usage)) return null;
   const usage = payload.usage, details = object(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
-  const input = presentInt(usage.prompt_tokens) ?? 0, output = presentInt(usage.completion_tokens) ?? 0;
+  const input = usageCounter(usage.prompt_tokens), output = usageCounter(usage.completion_tokens);
   const total = Math.max(input + output, presentInt(usage.total_tokens) ?? 0);
   const read = presentInt(details.cached_tokens) ?? presentInt(usage.cached_tokens) ?? presentInt(usage.prompt_cache_hit_tokens), write = presentInt(details.cache_write_tokens);
   if ([input, output, total, read, write].some(value => value !== null && value < 0) || (read ?? 0) + (write ?? 0) > input) throw new RangeError('Invalid provider token usage');

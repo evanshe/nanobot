@@ -163,7 +163,7 @@ test('truncated streams and SSE errors take priority over deferred usage parse e
       if (terminal === 'sse-error') assert.match(response.content!, /provider stream error/);
     }, async response => {
       response.setHeader('content-type', 'text/event-stream');
-      response.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: -1, completion_tokens: 0 } })}\n\n`);
+      response.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: terminal === 'finish' ? 'invalid' : -1, completion_tokens: 0 } })}\n\n`);
       response.write(`data: ${JSON.stringify(chunk({ content: 'live despite parse error' }))}\n\n`);
       if (terminal === 'finish' || terminal === 'disconnect-after-finish') response.write(`data: ${JSON.stringify(chunk({}, 'stop'))}\n\n`);
       if (terminal === 'sse-error') response.write('data: {"error":{"message":"provider stream error"}}\n\n');
