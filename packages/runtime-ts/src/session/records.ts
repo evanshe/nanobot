@@ -50,7 +50,16 @@ export function providerState(value: ConfigObject): ProviderConversationState | 
   if (typeof kind !== 'string' || !kind || typeof provider !== 'string' || !provider || typeof model !== 'string' || !model || typeof version !== 'number' || !Number.isInteger(version) || !object(payload) || !Array.isArray(pending) || !pending.every(object)) return null;
   return { kind, provider, model, version, payload, pending_messages: pending };
 }
-export const equal = (a: unknown, b: unknown): boolean => isDeepStrictEqual(a, b, { skipPrototype: true });
+export function equal(a: unknown, b: unknown): boolean {
+  if (isDeepStrictEqual(a, b, { skipPrototype: true })) return true;
+  // Python compares JSON booleans as integers. Draft conflict/merge decisions
+  // must retain that behavior even though the persisted JSON types stay intact.
+  if ((typeof a === 'boolean' || typeof a === 'number') && (typeof b === 'boolean' || typeof b === 'number')) return Number(a) === Number(b);
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((value, index) => equal(value, b[index]));
+  const plain = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && [null, Object.prototype].includes(Object.getPrototypeOf(value));
+  if (plain(a) && plain(b)) return Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(key => Object.hasOwn(b, key) && equal(a[key], b[key]));
+  return false;
+}
 export function publicHistoryMessage(message: SessionMessage): SessionMessage {
   const cleaned = structuredClone(message), marker = cleaned._runtime_context;
   delete cleaned._runtime_context;

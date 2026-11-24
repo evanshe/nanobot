@@ -152,3 +152,17 @@ test('temporary policy leaves no durable model transcript and does not expose sh
     await state.mutateMetadata(draft.key, metadata => { metadata.temporary = true; }); assert.equal((await state.get(draft.key)).messages.length, 2);
   } finally { await state.close(); }
 }));
+
+test('draft merging retains Python boolean/integer JSON equality without rewriting stored types', async () => isolated(async directory => {
+  const expected = reference(directory, 'metadata_equality');
+  const { state } = await open(directory);
+  try {
+    // Reuse the committed Python baseline and perform the same supported draft edit.
+    const draft = await state.get('chat:comparison');
+    draft.metadata.flag = 1; draft.metadata.nested = { value: 0 };
+    await state.finishTurn(draft);
+    assert.deepEqual(draft.metadata, expected.metadata);
+    assert.equal(draft.revision, expected.revision + 1);
+    assert.equal((await state.read(draft.key))!.metadata.flag, true);
+  } finally { await state.close(); }
+}));

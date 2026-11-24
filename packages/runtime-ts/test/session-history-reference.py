@@ -1,4 +1,5 @@
 """Python owner baseline for synthetic model/display history parity."""
+import asyncio
 import json
 import sys
 from dataclasses import asdict
@@ -14,6 +15,24 @@ root = Path(__file__).resolve().parents[3]
 request = json.load(sys.stdin)
 store = SqliteSessionStore(Path(request['directory']))
 store.initialize(Path(request['directory']) / 'workspace')
+if request['action'] == 'metadata_equality':
+    from nanobot.session.state import SessionState
+
+    async def compare():
+        state = SessionState(store)
+        try:
+            session = await state.get('chat:comparison')
+            await state.update_metadata(session.key, {'flag': True, 'nested': {'value': False}})
+            draft = await state.get(session.key)
+            draft.metadata['flag'] = 1
+            draft.metadata['nested'] = {'value': 0}
+            await state.finish_turn(draft)
+            print(json.dumps({'metadata': draft.metadata, 'revision': draft.revision}))
+        finally:
+            await state.aclose()
+
+    asyncio.run(compare())
+    raise SystemExit(0)
 if request['action'] == 'seed':
     fixture = json.loads((root / 'packages/runtime-ts/test/fixtures/stored-session.json').read_text())
     session = Session(**{key: value for key, value in fixture.items()
