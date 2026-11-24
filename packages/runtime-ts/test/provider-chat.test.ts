@@ -271,3 +271,13 @@ test('truthy SSE errors discard finished tool calls while Python-empty error val
     });
   }
 });
+test('429 quota text without semantic codes matches Python non-retryable classification', { timeout: 10_000 }, async () => {
+  for (const stream of [false, true]) {
+    await stub(async (base, requests) => {
+      const reference = await pythonReference({ base, request: synthetic, stream }), provider = new OpenAIChatProvider({ apiBase: base });
+      const response = stream ? await provider.chatStream(synthetic) : await provider.chat(synthetic);
+      assert.equal(response.error_status_code, 429); assert.equal(response.error_code, null); assert.deepEqual(errorMetadata(response), errorMetadata(reference.response));
+      assert.equal(reference.transient, false); assert.equal(isTransientChatResponse(response), false); assert.equal(requests.length, 2); await provider.close();
+    }, response => { response.writeHead(429, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: { message: 'You exceeded your current quota, please check your plan and billing details.' } })); });
+  }
+});

@@ -48,7 +48,7 @@ export function isTransientChatResponse(response: ChatResponse): boolean {
   if (status === 429) {
     const tokens = ['insufficient_quota', 'quota_exceeded', 'quota_exhausted', 'billing_hard_limit_reached', 'insufficient_balance', 'insufficient_credits', 'credit_balance_too_low', 'billing_not_active', 'payment_required'];
     if ([response.error_type, response.error_code].some(value => value && tokens.includes(value.trim().toLowerCase()))) return false;
-    if (['insufficient_quota', 'insufficient quota', 'quota exceeded', 'quota exhausted', 'billing hard limit', 'billing_hard_limit_reached', 'billing not active', 'insufficient balance', 'insufficient_balance', 'insufficient credits', 'insufficient_credits', 'credit balance too low', 'payment required', 'out of credits', 'out of quota'].some(marker => content.includes(marker))) return false;
+    if (['insufficient_quota', 'insufficient quota', 'quota exceeded', 'quota exhausted', 'billing hard limit', 'billing_hard_limit_reached', 'billing not active', 'insufficient balance', 'insufficient_balance', 'insufficient credits', 'insufficient_credits', 'credit balance too low', 'payment required', 'out of credits', 'out of quota', 'exceeded your current quota'].some(marker => content.includes(marker))) return false;
     return true;
   }
   if (status !== null && status !== undefined && ([408, 409].includes(status) || status >= 500)) return true;
