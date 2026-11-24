@@ -92,13 +92,15 @@ test('inbound/outbound FIFOs, recorder identity, event metadata copy and admissi
   await bus.publishInbound(incoming); assert.equal(bus.inboundSize, 1);
   const resume = bus.admission.pauseBeforeStart();
   await assert.rejects(bus.publishInbound(new InboundMessage(fixture.inbound)), RuntimeMaintenanceError);
-  assert.equal(await bus.consumeInbound(), incoming);
+  await assert.rejects(bus.consumeInbound(), RuntimeMaintenanceError); assert.equal(bus.inboundSize, 1);
+  resume();
+  const claim = await bus.consumeInbound(); assert.equal(claim.message, incoming); claim.release();
   const metadata = { locale: 'en', trace: 'one' };
   await bus.publishEvent(progress, 'cli', 'one', metadata); metadata.trace = 'changed';
   await bus.publishEvent({ ...progress, content: 'two' }, 'cli', 'one');
   assert.equal(bus.outboundSize, 2); assert.deepEqual(recorded, ['working', 'two']);
   assert.equal((await bus.consumeOutbound()).metadata.trace, 'one'); assert.equal((await bus.consumeOutbound()).content, 'two');
-  resume(); await bus.publishInbound(incoming); assert.equal(await bus.consumeInbound(), incoming);
+  await bus.publishInbound(incoming); const next = await bus.consumeInbound(); assert.equal(next.message, incoming); next.release();
 });
 test('queue cancellation before or after wakeup never consumes accepted messages', async () => {
   const queue = new AsyncQueue<string>(); const controller = new AbortController();
@@ -186,4 +188,22 @@ test('shared client-event compaction phases retain localized text fallback witho
   const event: EventMap['context_compaction'] = { kind: 'context_compaction', compactionId: 'c', phase: 'succeeded' };
   assert.equal(outboundMessageForEvent(event, 'cli', 'chat', { locale: 'en' }).content, 'Context compacted.');
   assert.notEqual(outboundMessageForEvent(event, 'cli', 'chat', { locale: 'zh_TW.UTF-8' }).content, 'Context compacted.');
+});
+test('normal inbound consume atomically claims work before maintenance can observe an empty queue', async () => {
+  const bus = new MessageBus(); const message = new InboundMessage(fixture.inbound);
+  await bus.publishInbound(message);
+  assert.throws(() => bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+  const consuming = bus.consumeInbound();
+  assert.equal(bus.inboundSize, 0);
+  // The caller has not resumed from await; the dequeue already owns activity.
+  assert.throws(() => bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+  const claim = await consuming; assert.equal(claim.message, message);
+  assert.throws(() => bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+  claim.release(); claim.release();
+  bus.admission.pauseIfIdle(() => false)();
+  await bus.publishInbound(message);
+  const failing = bus.withInbound(async accepted => { assert.equal(accepted, message); throw new Error('dispatch failed'); });
+  assert.throws(() => bus.admission.pauseIfIdle(() => false), RuntimeBusyError);
+  await assert.rejects(failing, /dispatch failed/);
+  bus.admission.pauseIfIdle(() => false)();
 });

@@ -1,6 +1,5 @@
 import type { Json } from '../config/decoder.ts';
 import type { LLMUsage } from './usage.ts';
-export interface AgentEvent { readonly kind: string }
 export type Metadata = Record<string, Json>;
 export type RuntimeEventContext = Readonly<{
   channel: string; chatId: string; sessionKey: string;
@@ -53,8 +52,13 @@ type EventPayloads<R> = {
 };
 export type EventMap<R = RuntimeReference> = { [K in keyof EventPayloads<R>]: Readonly<{ kind: K } & EventPayloads<R>[K]> };
 export type RuntimeEvent<R = RuntimeReference> = EventMap<R>[keyof EventMap<R>];
+export type ExtensionEvent<K extends `extension:${string}` = `extension:${string}`, P extends Metadata = Metadata> = Readonly<{ kind: K; payload: P }>;
+export function extensionEvent<const K extends `extension:${string}`, P extends Metadata>(kind: K, payload: P): ExtensionEvent<K, P> {
+  return { kind, payload };
+}
+export type AgentEvent<R = RuntimeReference> = RuntimeEvent<R> | ExtensionEvent;
 export type EventForKind<K extends keyof EventMap<R>, R = RuntimeReference> = K extends 'progress' ? EventMap<R>['progress'] | EventMap<R>['file_edit'] : K extends 'side_channel_reply' ? EventMap<R>['side_channel_reply'] | EventMap<R>['command_result'] : EventMap<R>[K];
-export function isEventKind<K extends keyof EventMap<R>, R = RuntimeReference>(event: AgentEvent, kind: K): event is EventForKind<K, R> {
+export function isEventKind<K extends keyof EventMap<R>, R = RuntimeReference>(event: AgentEvent<R>, kind: K): event is EventForKind<K, R> {
   return event.kind === kind || (kind === 'progress' && event.kind === 'file_edit') || (kind === 'side_channel_reply' && event.kind === 'command_result');
 }
 export type DeliveryRequest = Readonly<{ runId: string; sessionKey: string; sessionGeneration: string | null }>;
@@ -82,8 +86,8 @@ export class InboundMessage {
   get sessionKey(): string { return this.sessionKeyOverride || `${this.channel}:${this.chatId}`; }
   get isUserInput(): boolean { return this.inputRole !== null ? this.inputRole === 'user' : this.channel !== 'system'; }
 }
-export type OutboundMessage = {
+export type OutboundMessage<R = RuntimeReference> = {
   channel: string; chatId: string; content: string; replyTo?: string | null; media?: string[];
-  metadata: Metadata; buttons?: string[][]; event?: AgentEvent | null;
+  metadata: Metadata; buttons?: string[][]; event?: AgentEvent<R> | null;
   delivery?: DeliveryRequest | null; deliveryId?: string | null;
 };

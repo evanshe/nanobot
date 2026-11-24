@@ -6,7 +6,8 @@ export class AsyncQueue<T> {
   get size(): number { return this.#items.length; }
   putNowait(item: T): void { this.#items.push(item); this.#wakeNext(); }
   #wakeNext(): void { this.#waiters.shift()?.wake(); }
-  async get(signal?: AbortSignal): Promise<T> {
+  get(signal?: AbortSignal): Promise<T> { return this.claim(item => item, signal); }
+  async claim<U>(accept: (item: T) => U, signal?: AbortSignal): Promise<U> {
     try {
       signal?.throwIfAborted();
       while (!this.#items.length) {
@@ -23,7 +24,9 @@ export class AsyncQueue<T> {
         });
         signal?.throwIfAborted();
       }
-      return this.#items.shift()!;
+      const result = accept(this.#items[0]);
+      this.#items.shift();
+      return result;
     } catch (error) {
       if (this.#items.length) this.#wakeNext();
       throw error;

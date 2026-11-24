@@ -11,7 +11,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "typecheck:events": "tsc -p tsconfig.events.json"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

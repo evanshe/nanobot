@@ -7,7 +7,7 @@ function localeCode(value: string): string {
   if (base === 'zh') return parts.some(part => ['tw', 'hk', 'mo', 'hant'].includes(part)) ? 'zh-TW' : 'zh-CN';
   return base === 'pt' ? 'pt-BR' : base;
 }
-function eventContent(event: AgentEvent, locale: unknown): string {
+function eventContent<R>(event: AgentEvent<R>, locale: unknown): string {
   if (isEventKind(event, 'progress') || isEventKind(event, 'retry_wait') || isEventKind(event, 'stream_delta') || isEventKind(event, 'stream_end') || isEventKind(event, 'user_input')) return event.content;
   if (isEventKind(event, 'context_compaction')) {
     const tag = typeof locale === 'string' && locale ? locale : process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || 'en';
@@ -16,9 +16,9 @@ function eventContent(event: AgentEvent, locale: unknown): string {
   }
   return '';
 }
-export function outboundMessageForEvent(event: AgentEvent, channel: string, chatId: string, metadata: Metadata = {}, content?: string): OutboundMessage {
+export function outboundMessageForEvent<R>(event: AgentEvent<R>, channel: string, chatId: string, metadata: Metadata = {}, content?: string): OutboundMessage<R> {
   return { channel, chatId, content: content ?? eventContent(event, metadata.locale), metadata: { ...metadata }, event };
 }
-export function replaceOutboundEvent(message: OutboundMessage, event: AgentEvent, content?: string): OutboundMessage {
+export function replaceOutboundEvent<R>(message: OutboundMessage<R>, event: AgentEvent<R>, content?: string): OutboundMessage<R> {
   return { ...message, content: content ?? eventContent(event, message.metadata.locale), event };
 }

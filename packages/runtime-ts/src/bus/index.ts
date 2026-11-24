@@ -9,37 +9,45 @@ export * from './queue.ts';
 export * from './outbound.ts';
 export * from './usage.ts';
 export * from './publisher.ts';
-export type EventHandler<E extends AgentEvent = AgentEvent> = (event: E, signal: AbortSignal) => void | Promise<void>;
+export type EventHandler<E extends AgentEvent<unknown> = AgentEvent<unknown>> = (event: E, signal: AbortSignal) => void | Promise<void>;
 export type ScheduledDispatch = { readonly promise: Promise<void>; cancel(reason?: unknown): void };
-type Entry = { active: boolean; handle: EventHandler };
+type Entry<R> = { active: boolean; handle: EventHandler<AgentEvent<R>> };
+export type InboundClaim = { readonly message: InboundMessage; release(): void };
 export class MessageBus<R = RuntimeReference> {
   readonly admission: RuntimeAdmission;
-  readonly inbound = new AsyncQueue<InboundMessage>();
-  readonly outbound = new AsyncQueue<OutboundMessage>();
-  #handlers: Entry[] = [];
+  #inbound = new AsyncQueue<InboundMessage>();
+  readonly outbound = new AsyncQueue<OutboundMessage<R>>();
+  #handlers: Entry<R>[] = [];
   #pending = new Set<Promise<void>>();
-  #onError: (error: unknown, event: AgentEvent) => void;
-  outboundRecorder: ((message: OutboundMessage) => void) | null = null;
-  constructor(options: { admission?: RuntimeAdmission; onError?: (error: unknown, event: AgentEvent) => void } = {}) {
+  #onError: (error: unknown, event: AgentEvent<R>) => void;
+  outboundRecorder: ((message: OutboundMessage<R>) => void) | null = null;
+  constructor(options: { admission?: RuntimeAdmission; onError?: (error: unknown, event: AgentEvent<R>) => void } = {}) {
     this.admission = options.admission ?? new RuntimeAdmission();
+    this.admission.registerPendingWork(() => this.inboundSize > 0 || this.hasPendingEvents);
     this.#onError = options.onError ?? ((error, event) => console.error(`Event handler failed for ${event.kind}`, error));
   }
-  get inboundSize(): number { return this.inbound.size; }
+  get inboundSize(): number { return this.#inbound.size; }
   get outboundSize(): number { return this.outbound.size; }
   get hasPendingEvents(): boolean { return this.#pending.size > 0; }
   async publishInbound(message: InboundMessage): Promise<void> {
-    this.admission.check(); this.inbound.putNowait(message); // No suspension between admission and enqueue.
+    this.admission.check(); this.#inbound.putNowait(message); // No suspension between admission and enqueue.
   }
-  consumeInbound(signal?: AbortSignal): Promise<InboundMessage> { return this.inbound.get(signal); }
-  async publishOutbound(message: OutboundMessage): Promise<void> {
+  consumeInbound(signal?: AbortSignal): Promise<InboundClaim> {
+    return this.#inbound.claim(message => ({ message, release: this.admission.activity() }), signal);
+  }
+  async withInbound<T>(handle: (message: InboundMessage) => Promise<T> | T, signal?: AbortSignal): Promise<T> {
+    const claim = await this.consumeInbound(signal);
+    try { return await handle(claim.message); } finally { claim.release(); }
+  }
+  async publishOutbound(message: OutboundMessage<R>): Promise<void> {
     this.outboundRecorder?.(message); this.outbound.putNowait(message);
   }
-  consumeOutbound(signal?: AbortSignal): Promise<OutboundMessage> { return this.outbound.get(signal); }
-  async publishEvent<E extends AgentEvent>(event: E, channel: string, chatId: string, metadata?: Metadata): Promise<void> {
+  consumeOutbound(signal?: AbortSignal): Promise<OutboundMessage<R>> { return this.outbound.get(signal); }
+  async publishEvent(event: AgentEvent<R>, channel: string, chatId: string, metadata?: Metadata): Promise<void> {
     await this.publishOutbound(outboundMessageForEvent(event, channel, chatId, metadata));
   }
-  subscribe(handler: EventHandler): () => void {
-    const entry: Entry = { active: true, handle: handler };
+  subscribe(handler: EventHandler<AgentEvent<R>>): () => void {
+    const entry: Entry<R> = { active: true, handle: handler };
     this.#handlers.push(entry);
     return () => {
       if (!entry.active) return;
@@ -49,7 +57,7 @@ export class MessageBus<R = RuntimeReference> {
   on<K extends keyof EventMap<R>>(kind: K, handler: EventHandler<EventForKind<K, R>>): () => void {
     return this.subscribe((event, signal) => { if (isEventKind<K, R>(event, kind)) return handler(event, signal); });
   }
-  async publish<E extends AgentEvent>(event: E, signal: AbortSignal = new AbortController().signal): Promise<void> {
+  async publish(event: AgentEvent<R>, signal: AbortSignal = new AbortController().signal): Promise<void> {
     signal.throwIfAborted();
     for (const entry of [...this.#handlers]) {
       if (!entry.active) continue;
@@ -61,7 +69,7 @@ export class MessageBus<R = RuntimeReference> {
       signal.throwIfAborted();
     }
   }
-  publishNowait<E extends AgentEvent>(event: E): ScheduledDispatch {
+  publishNowait(event: AgentEvent<R>): ScheduledDispatch {
     const controller = new AbortController();
     // Python create_task also defers the first subscriber until the next loop turn.
     const promise = Promise.resolve().then(() => this.publish(event, controller.signal));
@@ -78,17 +86,17 @@ export class MessageBus<R = RuntimeReference> {
     }
   }
 }
-export class EventSink {
-  readonly #publish: ((event: AgentEvent, signal?: AbortSignal) => Promise<void>) | null;
+export class EventSink<R = RuntimeReference> {
+  readonly #publish: ((event: AgentEvent<R>, signal?: AbortSignal) => Promise<void>) | null;
   readonly #accepts: ((kind: string) => boolean) | null;
-  readonly #onError: (error: unknown, event: AgentEvent) => void;
-  constructor(publish: ((event: AgentEvent, signal?: AbortSignal) => Promise<void>) | null = null,
+  readonly #onError: (error: unknown, event: AgentEvent<R>) => void;
+  constructor(publish: ((event: AgentEvent<R>, signal?: AbortSignal) => Promise<void>) | null = null,
               accepts: ((kind: string) => boolean) | null = null,
-              onError: (error: unknown, event: AgentEvent) => void = (error, event) => console.error(`Failed to publish ${event.kind}`, error)) {
+              onError: (error: unknown, event: AgentEvent<R>) => void = (error, event) => console.error(`Failed to publish ${event.kind}`, error)) {
     this.#publish = publish; this.#accepts = accepts; this.#onError = onError;
   }
   accepts(kind: string): boolean { return this.#publish !== null && (this.#accepts === null || this.#accepts(kind)); }
-  async emit<E extends AgentEvent>(event: E, signal?: AbortSignal): Promise<void> {
+  async emit(event: AgentEvent<R>, signal?: AbortSignal): Promise<void> {
     if (!this.#publish) return;
     signal?.throwIfAborted();
     try { await this.#publish(event, signal); }
