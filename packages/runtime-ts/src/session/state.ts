@@ -270,6 +270,9 @@ export class SessionState {
   listSessions(signal?: AbortSignal): Promise<SessionInfo[]> {
     return this.#submit(null, () => this.#repository.driver.read(snapshot => this.#repository.listFrom(snapshot), signal), { signal, barrier: false });
   }
+  discard(key: string, signal?: AbortSignal): Promise<void> {
+    return this.#submit([key], async () => { this.#transients.delete(key); this.#snapshots.delete(key); this.#policies.delete(key); this.#retired.add(key); }, { signal });
+  }
   reset(key: string, signal?: AbortSignal): Promise<void> {
     return this.#submit([key], async () => {
       const committed = await this.#repository.driver.write(async transaction => {
