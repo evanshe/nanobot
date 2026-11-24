@@ -1,3 +1,7 @@
+import { AgentContextGovernor } from './governor.ts';
+import type { AgentContextGovernorOptions, AgentSummaryCheckpoint } from './governor.ts';
+import { pythonJson, normalizeAgentToolResult } from './requests.ts';
+export { ContextWindowExceededError, estimateAgentPromptBytes } from './requests.ts';
 import { randomUUID } from 'node:crypto';
 import { object } from '../config/decoder.ts';
 import type { ConfigObject, Json } from '../config/decoder.ts';
@@ -7,7 +11,7 @@ import type { LLMUsage } from '../bus/usage.ts';
 import type { ChatCallbacks, ChatRequest, ChatResponse } from '../provider/chat.ts';
 import type { ChatToolCall, ChatUsage } from '../provider/values.ts';
 import { parseChatToolArguments } from '../provider/values.ts';
-import { stripThink, hiddenHistory } from '../session/records.ts';
+import { stripThink } from '../session/records.ts';
 import prompts from './prompts.json' with { type: 'json' };
 
 export interface AgentModel {
@@ -33,45 +37,21 @@ export type AgentRunSpec = {
   maxIterationsMessage?: string; events?: EventSink;
   onCheckpoint?: (checkpoint: AgentCheckpoint) => Promise<void>;
   prepareRequest?: (messages: readonly ConfigObject[], tools: readonly ConfigObject[], signal: AbortSignal) => Promise<ConfigObject[]>;
+  governor?: AgentContextGovernor;
+  consolidateHistory?: AgentContextGovernorOptions['consolidateHistory']; buildSummaryTranscript?: AgentContextGovernorOptions['buildSummaryTranscript']; acceptedHistoryBoundary?: number; activeSummary?: string | null;
   estimatePromptTokens?: (messages: readonly ConfigObject[], tools: readonly ConfigObject[]) => number;
 };
 export type AgentRunResult = {
   final_content: string | null; messages: ConfigObject[]; tools_used: string[]; usage: LLMUsage | null; round_usages: LLMUsage[];
   stop_reason: 'completed' | 'max_iterations' | 'empty_final_response' | 'error'; error: string | null;
-  tool_events: ConfigObject[];
+  tool_events: ConfigObject[]; summary_checkpoint: AgentSummaryCheckpoint | null;
 };
-export class ContextWindowExceededError extends Error {
-  readonly estimatedTokens: number; readonly inputBudget: number;
-  constructor(estimated: number, budget: number, sessionKey = 'default') {
-    super(`Model input exceeds the local context budget for ${sessionKey}: ${estimated}/${budget} via heuristic`);
-    this.name = 'ContextWindowExceededError'; this.estimatedTokens = estimated; this.inputBudget = budget;
-  }
-}
-function pythonJson(value: Json): string {
-  if (Array.isArray(value)) return `[${value.map(pythonJson).join(', ')}]`;
-  if (object(value)) return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${pythonJson(item)}`).join(', ')}}`;
-  return JSON.stringify(value);
-}
 export function agentToolCallMessage(call: ChatToolCall): ConfigObject {
   const result: ConfigObject = { id: call.id, type: 'function', function: { name: call.name, arguments: typeof call.arguments === 'string' ? call.arguments : pythonJson(call.arguments) } };
   if (call.extra_content) result.extra_content = structuredClone(call.extra_content);
   if (call.provider_specific_fields) result.provider_specific_fields = structuredClone(call.provider_specific_fields);
   if (call.function_provider_specific_fields && object(result.function)) result.function.provider_specific_fields = structuredClone(call.function_provider_specific_fields);
   return result;
-}
-// Python's conservative UTF-8 fallback. A runtime can supply its tokenizer or
-// provider counter; counting is applied to the final prepared model request.
-export function estimateAgentPromptBytes(messages: readonly ConfigObject[], tools: readonly ConfigObject[] = []): number {
-  const parts: string[] = [];
-  for (const msg of messages) {
-    if (typeof msg.content === 'string') parts.push(msg.content);
-    else if (Array.isArray(msg.content)) for (const block of msg.content) if (object(block) && block.type === 'text' && typeof block.text === 'string' && block.text) parts.push(block.text);
-    if (msg.tool_calls) parts.push(pythonJson(msg.tool_calls));
-    if (typeof msg.reasoning_content === 'string' && msg.reasoning_content) parts.push(msg.reasoning_content);
-    for (const key of ['name', 'tool_call_id']) if (typeof msg[key] === 'string' && msg[key]) parts.push(msg[key]);
-  }
-  const payload = parts.join('\n') + (tools.length ? `${parts.join('\n') ? '\n' : ''}${pythonJson([...tools])}` : '');
-  return Buffer.byteLength(payload, 'utf8') + messages.length * 4;
 }
 function usage(value: ChatUsage): LLMUsage {
   return { inputTokens: value.input_tokens, outputTokens: value.output_tokens, totalTokens: value.total_tokens, cacheReadTokens: value.cache_read_tokens, cacheWriteTokens: value.cache_write_tokens, reportedTokens: value.reported_tokens, estimatedTokens: value.estimated_tokens, generationMs: value.generation_ms, measuredOutputTokens: value.measured_output_tokens, ttftMs: value.ttft_ms, timedRequests: value.timed_requests, contextTokens: value.context_tokens, requestCount: value.request_count };
@@ -93,24 +73,12 @@ function assistant(content: string | null, response: ChatResponse, ids: string[]
   if (response.reasoning_content !== null) value.reasoning_content = stripThink(response.reasoning_content);
   return value;
 }
-function normalizeResult(name: string, content: Json, limit: number): Json {
-  if (content === null || typeof content === 'string' && !content.trim() || Array.isArray(content) && !content.length) return `(${name} completed with no output)`;
-  return typeof content === 'string' && limit > 0 && [...content].length > limit ? `${[...content].slice(0, limit).join('')}\n... (truncated)` : structuredClone(content);
-}
-function mergeVisibleUserText(messages: ConfigObject[]): ConfigObject[] {
-  const prepared: ConfigObject[] = [];
-  for (const source of messages) {
-    const last = prepared.at(-1);
-    if (source.role === 'user' && last?.role === 'user' && !hiddenHistory(source) && !hiddenHistory(last) && typeof source.content === 'string' && typeof last.content === 'string') last.content = `${last.content}\n\n${source.content}`;
-    else prepared.push(source);
-  }
-  return prepared;
-}
 export class AgentRunner {
   async run(spec: AgentRunSpec, signal = new AbortController().signal): Promise<AgentRunResult> {
     if (!Number.isSafeInteger(spec.maxIterations) || spec.maxIterations < 0 || !Number.isSafeInteger(spec.maxToolResultChars)) throw new RangeError('Runner limits must be integers, with non-negative iteration count');
     const messages = structuredClone([...spec.initialMessages]), start = messages.length, events = spec.events ?? NO_EVENTS;
-    const result: AgentRunResult = { final_content: null, messages, tools_used: [], usage: null, round_usages: [], stop_reason: 'completed', error: null, tool_events: [] };
+    const result: AgentRunResult = { final_content: null, messages, tools_used: [], usage: null, round_usages: [], stop_reason: 'completed', error: null, tool_events: [], summary_checkpoint: null };
+    const governor = spec.governor ?? new AgentContextGovernor(messages, { ...spec, events });
     const runId = randomUUID(), lengths: string[] = []; let sequence = 0, empty = 0, lastStreamedContent = ''; 
     const checkpoint = async (phase: AgentCheckpoint['phase'], iteration: number, message: ConfigObject | null, completed: ConfigObject[] = [], pending: ConfigObject[] = []) => {
       const batchSize = phase === 'model_input' ? 0 : 1 + completed.length;
@@ -118,9 +86,8 @@ export class AgentRunner {
     };
     const invoke = async (requestMessages: ConfigObject[], tools: readonly ConfigObject[]): Promise<ChatResponse> => {
       signal.throwIfAborted(); lastStreamedContent = '';
-      const prepared = mergeVisibleUserText(spec.prepareRequest ? await spec.prepareRequest(structuredClone(requestMessages), structuredClone([...tools]), signal) : structuredClone(requestMessages));
-      const budget = spec.contextWindowTokens ? Math.max(0, spec.contextWindowTokens - (spec.maxTokens ?? 4096) - 1024) : 0;
-      if (budget) { const count = (spec.estimatePromptTokens ?? estimateAgentPromptBytes)(prepared, tools); if (count > budget) throw new ContextWindowExceededError(count, budget, spec.sessionKey); }
+      let prepared = await governor.prepare(requestMessages, tools, signal);
+      if (spec.prepareRequest) { prepared = await spec.prepareRequest(structuredClone(prepared), structuredClone([...tools]), signal); governor.ensureFits(prepared, tools); }
       const requestId = randomUUID(), ids = inputIds(messages);
       const emit = async (phase: 'started' | 'completed' | 'failed' | 'cancelled', requestUsage: LLMUsage | null = null) => events.emit({ kind: 'model_request', requestId, runId, sequence: ++sequence, phase, requestUsage, usage: result.usage, roundUsages: result.round_usages, contextWindowTokens: spec.contextWindowTokens, responseInputIds: phase === 'started' ? ids : [] });
       await events.emit({ kind: 'response_inputs', inputIds: ids }, signal); await emit('started');
@@ -131,7 +98,7 @@ export class AgentRunner {
           onThinkingDelta: async content => events.emit({ kind: 'progress', content, reasoning: true, reasoningDelta: true }, signal),
           onToolCallDelta: async delta => events.emit({ kind: 'progress', content: '', toolEvents: [{ ...delta }] }, signal),
         }, signal);
-        signal.throwIfAborted();
+        signal.throwIfAborted(); governor.accept(requestMessages.length, prepared, response, tools); result.summary_checkpoint = governor.summaryCheckpoint;
         if (response.usage) { const round = usage(response.usage); result.round_usages.push(round); result.usage = result.usage ? addUsage(result.usage, round) : round; }
         await emit(response.finish_reason === 'error' ? 'failed' : 'completed', response.usage ? usage(response.usage) : null);
         return structuredClone(response);
@@ -192,7 +159,7 @@ export class AgentRunner {
           signal.removeEventListener('abort', abortTools);
           const completed: ConfigObject[] = [];
           for (const call of response.tool_calls) {
-            const outcome = settled.get(call.id), row: ConfigObject = { role: 'tool', tool_call_id: call.id, name: call.name, content: outcome ? normalizeResult(call.name, outcome.content, spec.maxToolResultChars) : interrupted };
+            const outcome = settled.get(call.id), row: ConfigObject = { role: 'tool', tool_call_id: call.id, name: call.name, content: outcome ? normalizeAgentToolResult(call.name, outcome.content, spec.maxToolResultChars) : interrupted };
             if (!outcome) row._recovery_interrupted = true;
             else { const detail = outcome.detail ?? (outcome.content === null ? '(empty)' : String(outcome.content).replaceAll('\n', ' ').trim() || '(empty)'); result.tool_events.push({ name: call.name, status: outcome.status, detail }); if (outcome.status === 'ok') result.tools_used.push(call.name); }
             messages.push(row); completed.push(row);

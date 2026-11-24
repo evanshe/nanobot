@@ -44,7 +44,7 @@ class SyntheticModel(LLMProvider):
             finish_reason=frame.get('finish_reason', 'stop'),
             tool_calls=[ToolCallRequest(**call) for call in frame.get('tool_calls', [])],
             usage=LLMUsage.reported(**{key: value for key, value in
-                                      frame.get('usage', {'input_tokens': 1, 'output_tokens': 1}).items()
+                                      (frame.get('usage') or {'input_tokens': 1, 'output_tokens': 1}).items()
                                       if key in {'input_tokens', 'output_tokens', 'total_tokens',
                                                  'cache_read_tokens', 'cache_write_tokens'}}),
         )
@@ -76,7 +76,7 @@ async def main():
         checkpoints.append(deepcopy(value))
 
     async def consolidate(_messages, _summary):
-        return None
+        return request.get('summary_text')
 
     try:
         result = await AgentRunner().run(AgentRunSpec(
