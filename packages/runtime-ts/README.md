@@ -50,3 +50,13 @@ Focused tests execute a billion-step recursive SELECT in a child with a hard tim
 uv run --no-sync python -m scripts.export_ts_session_schema --check
 node --test packages/runtime-ts/test/sqlite-driver.test.ts
 ```
+
+### Model/display history and ordered ownership (2A second increment)
+
+`SessionRepository` reads and writes Python session rows, private provider continuation state, checkpoint and follow-up side tables without mixing display facts into model messages. Stored datetimes remain strings so existing microseconds and offset identity survive reads/writes; new local timestamps follow Python's naive local session-date format. Saves validate revision/generation, update only changed message suffixes, and retain the private/public metadata separation.
+
+`SessionState` supplies bounded per-key ordering and global barriers, detached owner-issued drafts, three-way draft merging, synchronous metadata commands, generation-aware reset/delete, private transient policies, archival membership and atomic model/display forks. Accepted mutations settle before cancellation reaches the caller; close drains all admitted work. Unordered snapshot reads can observe the last committed WAL state while a writer waits. Metadata commands leave the transcript and activity timestamp intact, protect turn-owned keys through the public update path, and publish cached views only after commit. Deleted keys reject late implicit creation until an explicit get starts a new generation.
+
+`HistoryFact`/`HistoryReader` preserve ordered typed display records, independent history revisions, input-id deduplication, byte/record page budgets, navigation, context-usage boundaries and open-tail sequence identities. Existing compressed graph fields remain readable opaque storage values with their original logical-byte accounting; new inline graph JSON is a Python-readable format. Transport-specific thread projection and model prompt replay assembly remain with their later owners. The shared history fixture is compared against Python's real repository and reader, including both Python→TS and TS→Python paths; owner tests cover concurrent mutations, stale generations, rollback of failed forks, WAL snapshots, capacity, cancellation/drain and temporary data exclusion.
+
+Session location/namespace coordination and complete legacy JSONL initialization are not supplied by this increment. Callers must not treat a schema-only driver as a fully initialized profile; the final 2A initialization/recovery increment owns those gates.

@@ -1,0 +1,9 @@
+[
+  {"kind":"input","content":{"text":"question","input_id":"input-1"},"turn_id":"turn-1","phase":"user","sequence":1,"created_at_ms":1000},
+  {"kind":"reasoning_segment","content":{"text":"private reasoning"},"turn_id":"turn-1","phase":"reasoning","sequence":2,"created_at_ms":1001},
+  {"kind":"file_activity","content":{"edits":[{"path":"notes.md","diff":"-old\n+new"}]},"turn_id":"turn-1","phase":"activity","sequence":3,"created_at_ms":1002},
+  {"kind":"answer_segment","content":{"text":"answer","response_input_ids":["input-1"]},"turn_id":"turn-1","phase":"answer","sequence":4,"created_at_ms":1003},
+  {"kind":"completion","content":{"usage":{"total_tokens":30},"outcome":"completed"},"turn_id":"turn-1","phase":"complete","sequence":5,"created_at_ms":1004},
+  {"kind":"input","content":{"text":"next","input_id":"input-2"},"turn_id":"turn-2","phase":"user","sequence":1,"created_at_ms":1005},
+  {"kind":"model_request","content":{"phase":"completed","request_usage":{"prompt_tokens":220},"context_window_tokens":1000},"turn_id":"turn-2","phase":"model","sequence":2,"created_at_ms":1006}
+]
