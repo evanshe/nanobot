@@ -121,3 +121,41 @@ test('stop retains activity until a cancellation-suppressing model settles befor
     const resume = runtime.bus.admission.pauseIfIdle(() => false); resume();
   } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('explicit recovery confirmation is single-use and preserves saved tool results and origin', async () => isolated(async (directory, agent, builtin) => {
+  let models = 0, executions = 0; const requests: ChatRequest[] = [], tools = registry(); tools.execute = async () => { executions++; return { content: 'unexpected', status: 'ok' }; };
+  const runtime = await create(directory, agent, builtin, { chatStream: async request => { models++; requests.push(request); return frame('continued'); } }, tools);
+  try {
+    const generation = await seedCheckpoint(runtime), session = await runtime.store.state.get('cli:recover'); session.metadata.request_origin = { message_id: 'original', turn_id: 'original-turn' }; await runtime.store.state.prepareInput(session);
+    const [candidate] = await runtime.loop.scanRecovery(); assert.equal(candidate.canContinue, true);
+    const confirmation = { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true };
+    await assert.rejects(runtime.loop.resumeSession(session.key, { ...confirmation, confirmed: false }), /explicit confirmation/); assert.equal(models, 0);
+    const outcomes = await Promise.allSettled([runtime.loop.resumeSession(session.key, confirmation), runtime.loop.resumeSession(session.key, confirmation)]);
+    assert.equal(outcomes[0].status, 'fulfilled'); assert.equal(outcomes[1].status, 'rejected'); assert.equal(models, 1); assert.equal(executions, 0);
+    assert.match(JSON.stringify(requests[0].messages), /actual saved result/); assert.match(String(requests[0].messages.at(-1)?.content), /Continue the interrupted request/);
+    const saved = await runtime.store.state.get(session.key); assert.deepEqual(saved.metadata.request_origin, { message_id: 'original', turn_id: 'original-turn' });
+    assert.equal(saved.messages.filter(row => row.content === 'actual saved result').length, 1); assert.equal(saved.messages.at(-1)?.content, 'continued'); assert.doesNotMatch(JSON.stringify(saved.messages), /Continue the interrupted request/);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('recovery tickets reject changed content, stale generations and final-response continuation', async () => isolated(async (directory, agent, builtin) => {
+  let models = 0; const runtime = await create(directory, agent, builtin, { chatStream: async () => { models++; return frame('never'); } });
+  try {
+    const generation = await seedCheckpoint(runtime); let [candidate] = await runtime.loop.scanRecovery();
+    await runtime.store.state.updateMetadata(candidate.key, { extra: 'changed' });
+    await assert.rejects(runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true }), /stale/);
+    [candidate] = await runtime.loop.scanRecovery(); await runtime.store.state.reset(candidate.key);
+    await assert.rejects(runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true }), /replaced/);
+    await seedCheckpoint(runtime); const draft = await runtime.store.state.get(candidate.key); (draft.metadata.runtime_checkpoint as ConfigObject).phase = 'final_response'; await runtime.store.state.prepareInput(draft);
+    [candidate] = await runtime.loop.scanRecovery(); assert.equal(candidate.canContinue, false); await assert.rejects(runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: draft.generation, confirmed: true }), /cannot continue/); assert.equal(models, 0);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('new input cancels recovery and waits for an uncooperative request before reading its draft', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void, release!: () => void, count = 0; const reached = new Promise<void>(resolve => { entered = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async request => { if (++count === 1) { entered(); await blocked; return frame('late recovery'); } assert.match(JSON.stringify(request.messages), /actual saved result/); return frame('fresh answer'); } });
+  try {
+    const generation = await seedCheckpoint(runtime), [candidate] = await runtime.loop.scanRecovery();
+    const recovery = runtime.loop.resumeSession(candidate.key, { recoveryId: candidate.recoveryId, expectedGeneration: generation, confirmed: true }); await reached;
+    const fresh = runtime.loop.processDirect('fresh input', { sessionKey: candidate.key }); await new Promise(resolve => setImmediate(resolve)); assert.equal(count, 1);
+    release(); await assert.rejects(recovery, /superseded/); assert.equal((await fresh)?.content, 'fresh answer');
+    const saved = await runtime.store.state.get(candidate.key); assert.doesNotMatch(JSON.stringify(saved.messages), /late recovery/); assert.equal(saved.messages.filter(row => row.content === 'actual saved result').length, 1);
+  } finally { release(); await runtime.loop.close(); await runtime.store.close(); }
+}));

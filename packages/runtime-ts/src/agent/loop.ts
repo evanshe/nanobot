@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { InboundMessage, EventSink, MessageBus, RuntimeEventPublisher, RuntimeBusyError } from '../bus/index.ts';
 import type { AgentEvent, EventMap, OutboundMessage, Metadata, LLMUsage } from '../bus/index.ts';
 import { object } from '../config/decoder.ts';
@@ -46,10 +46,13 @@ export class AgentLoopCancellation extends Error {
   readonly preserveCheckpoint: boolean;
   constructor(message: string, preserveCheckpoint: boolean) { super(message); this.name = 'AbortError'; this.preserveCheckpoint = preserveCheckpoint; }
 }
-export type AgentRecoveryCandidate = { key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
+const CONTINUATION = 'Continue the interrupted request from the saved conversation context. Do not repeat completed work or mention the restart unless it affects the answer.';
+function recoveryFingerprint(session: SessionRecord): string { return createHash('sha256').update(JSON.stringify({ generation: session.generation, messages: session.messages, metadata: session.metadata })).digest('hex'); }
+export type AgentRecoveryCandidate = { recoveryId: string; canContinue: boolean; key: string; generation: string; phase: string | null; checkpointValid: boolean; pendingInput: boolean; pendingFollowups: number; unfinishedDisplayTurn: boolean; requiresConfirmation: boolean };
 export class AgentLoop {
   readonly #options: AgentLoopOptions; readonly #publisher: RuntimeEventPublisher<AgentRuntime>;
   readonly #tails = new Map<string, Promise<unknown>>(); readonly #pending = new Set<Promise<unknown>>();
+  readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, AbortController>();
   readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
   constructor(options: AgentLoopOptions) { this.#options = { ...options }; this.#publisher = new RuntimeEventPublisher(options.bus); }
   #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -105,10 +108,25 @@ export class AgentLoop {
         const session = await this.#options.state.read(key); if (!session) return null;
         const checkpoint = session.metadata.runtime_checkpoint, pending = Boolean(session.metadata.pending_user_turn);
         if (!object(checkpoint) && !pending && !unfinished) return null;
-        return { key, generation: session.generation, phase: object(checkpoint) && typeof checkpoint.phase === 'string' ? checkpoint.phase : null, checkpointValid: object(checkpoint) && runtimeCheckpointIsWellFormed(checkpoint), pendingInput: pending, pendingFollowups: pendingFollowups(session).length, unfinishedDisplayTurn: unfinished, requiresConfirmation: !(object(checkpoint) && checkpoint.phase === 'final_response' && runtimeCheckpointIsWellFormed(checkpoint)) };
+        const recoveryId = randomUUID(); this.#tickets.set(key, { id: recoveryId, fingerprint: recoveryFingerprint(session) });
+        return { recoveryId, canContinue: object(checkpoint) ? runtimeCheckpointIsWellFormed(checkpoint) && checkpoint.phase !== 'final_response' : pending, key, generation: session.generation, phase: object(checkpoint) && typeof checkpoint.phase === 'string' ? checkpoint.phase : null, checkpointValid: object(checkpoint) && runtimeCheckpointIsWellFormed(checkpoint), pendingInput: pending, pendingFollowups: pendingFollowups(session).length, unfinishedDisplayTurn: unfinished, requiresConfirmation: !(object(checkpoint) && checkpoint.phase === 'final_response' && runtimeCheckpointIsWellFormed(checkpoint)) };
       }); if (candidate) result.push(candidate);
     }
     return result;
+  }
+  resumeSession(key: string, options: { recoveryId: string; confirmed: boolean; expectedGeneration: string; channel?: string; chatId?: string; signal?: AbortSignal }): Promise<OutboundMessage<AgentRuntime> | null> {
+    if (options.confirmed !== true) return Promise.reject(new Error('Recovery continuation requires explicit confirmation'));
+    return this.#serial(key, async controller => {
+      const session = await this.#options.state.read(key), ticket = this.#tickets.get(key);
+      if (!session || session.generation !== options.expectedGeneration) throw new SessionConflictError('Recovery belongs to a replaced session');
+      if (!ticket || ticket.id !== options.recoveryId || ticket.fingerprint !== recoveryFingerprint(session)) throw new SessionConflictError('Recovery confirmation is stale or already consumed');
+      const checkpoint = session.metadata.runtime_checkpoint;
+      if (object(checkpoint) ? !runtimeCheckpointIsWellFormed(checkpoint) || checkpoint.phase === 'final_response' : !session.metadata.pending_user_turn) throw new Error('Recovery cannot continue this checkpoint');
+      this.#tickets.delete(key); this.#activeResume.set(key, controller);
+      try {
+        return await this.#turn(new InboundMessage({ channel: options.channel ?? 'cli', chatId: options.chatId ?? 'direct', senderId: 'system', content: CONTINUATION, sessionKeyOverride: key, sessionGeneration: session.generation }), { signal: controller.signal, resume: true, publishAcceptance: false, publishCompletion: false });
+      } finally { this.#activeResume.delete(key); }
+    }, options.signal);
   }
   processDirect(content: string, options: DirectTurnOptions & { sessionKey?: string; channel?: string; chatId?: string; senderId?: string; media?: string[]; metadata?: Metadata } = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     if (options.channel === 'system') return Promise.reject(new Error("channel 'system' is reserved for internal messages"));
@@ -116,9 +134,10 @@ export class AgentLoop {
   }
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
+    this.#activeResume.get(key)?.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
     return this.#serial(key, controller => this.#turn(message, { ...captured, signal: controller.signal }), options.signal);
   }
-  async #turn(message: InboundMessage, options: DirectTurnOptions): Promise<OutboundMessage<AgentRuntime> | null> {
+  async #turn(message: InboundMessage, options: DirectTurnOptions & { resume?: boolean }): Promise<OutboundMessage<AgentRuntime> | null> {
     const { state, bus, context, dataDirectory } = this.#options, key = message.sessionKey, turnId = randomUUID().replaceAll('-', ''), started = performance.now(), signal = options.signal ?? new AbortController().signal;
     let draft: SessionRecord, temporaryKey: string | null = null;
     if (options.ephemeral) {
@@ -134,7 +153,7 @@ export class AgentLoop {
     const ephemeral = !draft.policy.persist;
     try {
       signal.throwIfAborted();
-      if (restoreRuntimeCheckpoint(draft) || restorePendingInterruption(draft)) await state.restoreInterruption(draft);
+      if (restoreRuntimeCheckpoint(draft) || (!options.resume && restorePendingInterruption(draft))) await state.restoreInterruption(draft);
       const runtime = Object.freeze({ ...await this.#options.runtimeForSession(structuredClone(draft), message) }); signal.throwIfAborted();
       const baseTools = this.#options.tools, disabled = new Set(draft.policy.disabledTools);
       const tools: AgentTools = { definitions: structuredClone(baseTools.definitions.filter(item => object(item.function) && !disabled.has(String(item.function.name)))), validate: baseTools.validate.bind(baseTools), execute: baseTools.execute.bind(baseTools), concurrencySafe: baseTools.concurrencySafe?.bind(baseTools) };
@@ -142,11 +161,12 @@ export class AgentLoop {
       const contextOptions: ContextOptions = { projectWorkspace: project, channel: message.channel, includeMemory: !ephemeral, hasCron: !ephemeral && tools.definitions.some(item => object(item.function) && item.function.name === 'cron') };
       const history = await sessionModelHistory(draft, { dataDirectory, signal }), previousCount = draft.messages.length;
       const blocks = await this.#options.runtimeContext?.(message, structuredClone(draft)) ?? [];
-      const transcript = await context.buildTranscript({ history, currentMessage: message.content, currentRole: message.isUserInput ? 'user' : 'system', media: message.media, runtimeContextBlocks: blocks, inputMetadata: inputMetadata(message), sessionSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? { text: draft.metadata._last_summary.text, last_active: typeof draft.metadata._last_summary.last_active === 'string' ? draft.metadata._last_summary.last_active : draft.updatedAt } : null }, contextOptions);
+      const transcript = await context.buildTranscript({ history, currentMessage: message.content, currentRole: message.isUserInput ? 'user' : 'system', media: message.media, runtimeContextBlocks: blocks, inputMetadata: options.resume ? undefined : inputMetadata(message), sessionSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? { text: draft.metadata._last_summary.text, last_active: typeof draft.metadata._last_summary.last_active === 'string' ? draft.metadata._last_summary.last_active : draft.updatedAt } : null }, contextOptions);
       signal.throwIfAborted();
-      const current = transcript.at(-1)!, early = Boolean(message.content.trim() || message.media.length || blocks.length);
+      const current = transcript.at(-1)!, early = !options.resume && Boolean(message.content.trim() || message.media.length || blocks.length);
+      if (options.resume) { current._hidden_history = { kind: 'internal_continuation' }; draft.metadata.pending_user_turn = true; }
       if (early) { await persistAgentMessages(draft, [current], { dataDirectory }); draft.metadata.pending_user_turn = true; }
-      draft.metadata.request_origin = { message_id: typeof message.metadata.message_id === 'string' ? message.metadata.message_id : null, turn_id: turnId };
+      if (!options.resume) draft.metadata.request_origin = { message_id: typeof message.metadata.message_id === 'string' ? message.metadata.message_id : null, turn_id: turnId };
       await state.prepareInput(draft); signal.throwIfAborted();
       if (options.publishAcceptance !== false) await this.#publisher.userInputAccepted(message, key);
       await this.#publisher.sessionTurnStarted(message, key); await this.#publisher.turnRuntimeAdmitted(message, key, runtime, turnId); await this.#publisher.runStatusChanged(message, key, 'running', Date.now() / 1000);
@@ -154,14 +174,14 @@ export class AgentLoop {
       const runnerEvents = events;
       const checkpoint = async (payload: AgentCheckpoint) => {
         const preceding = newSession('checkpoint'); preceding.policy = draft.policy;
-        await persistAgentMessages(preceding, payload.preceding_messages, { dataDirectory, storeImages: !ephemeral });
+        await persistAgentMessages(preceding, payload.preceding_messages.filter(row => !(object(row._hidden_history) && row._hidden_history.kind === 'internal_continuation')), { dataDirectory, storeImages: !ephemeral });
         const record: ConfigObject = { phase: payload.phase, iteration: payload.iteration, model: payload.model, assistant_message: payload.assistant_message, completed_tool_results: payload.completed_tool_results, pending_tool_calls: payload.pending_tool_calls, preceding_messages: preceding.messages, consumed_followup_ids: [...preceding.consumedFollowupIds] };
         if (Object.hasOwn(payload, 'provider_state')) { record.provider_state_checkpoint_version = 'v1'; draft.providerState = null; }
         await state.checkpointView(draft, record);
       };
       const model = new RetryingAgentModel(runtime.model, { ...this.#options.retry, events: runnerEvents });
       const result = await new AgentRunner().run({ initialMessages: transcript, model, modelName: runtime.modelName, tools, maxIterations: this.#options.maxIterations ?? 40, maxToolResultChars: this.#options.maxToolResultChars ?? 65536, maxTokens: runtime.maxTokens, temperature: runtime.temperature, reasoningEffort: runtime.reasoningEffort, contextWindowTokens: runtime.contextWindowTokens, sessionKey: key, events: runnerEvents, onCheckpoint: checkpoint, acceptedHistoryBoundary: 1 + history.length, activeSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? draft.metadata._last_summary.text : null, consolidateHistory: this.#options.consolidateHistory, buildSummaryTranscript: async summary => [{ role: 'system', content: await context.buildSystemPrompt(contextOptions, { text: summary, last_active: localTimestamp() }) }] }, signal);
-      const latency = Math.max(0, Math.trunc(performance.now() - started)), skip = transcript.length - (early ? 0 : 1);
+      const latency = Math.max(0, Math.trunc(performance.now() - started)), skip = options.resume ? transcript.length : transcript.length - (early ? 0 : 1);
       const boundaries = await persistAgentMessages(draft, result.messages.slice(skip), { dataDirectory, latencyMs: latency, storeImages: !ephemeral });
       if (!ephemeral && result.usage) draft.metadata._last_usage = usageRecord(result.usage);
       if (!ephemeral) { if (result.stop_reason === 'max_iterations') draft.metadata._stopped_at_iteration_limit = true; else delete draft.metadata._stopped_at_iteration_limit; }
