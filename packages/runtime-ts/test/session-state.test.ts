@@ -179,3 +179,27 @@ test('existing Python large integers reject reads and title edits without alteri
     assert.equal(inspected.status, 0, inspected.stderr); assert.equal(inspected.stdout.trim(), '1234567890123456789');
   } finally { await opened.state.close(); }
 }));
+
+test('policy changes cannot promote private transient history or missing sessions to durable storage', async () => isolated(async directory => {
+  const opened = await open(directory), durable = { persist: true, logContent: true, disabledTools: ['shell'] }, temporary = { persist: false, logContent: false, disabledTools: [] };
+  try {
+    const secret = newSession('chat:private'); addSessionMessage(secret, 'user', 'private-history');
+    await opened.state.registerTransient(secret, temporary);
+    await assert.rejects(opened.state.setPolicy(secret.key, durable), /existing durable session/);
+    await assert.rejects(opened.state.setPolicy('chat:missing', durable), /existing durable session/);
+    await assert.rejects(opened.state.setPolicy(secret.key, temporary), /registerTransient/);
+    await opened.state.updateMetadata(secret.key, { title: 'private title' });
+    assert.equal((await opened.state.get(secret.key)).messages[0].content, 'private-history');
+    await opened.state.get('chat:durable');
+    await opened.state.setPolicy('chat:durable', durable);
+    assert.deepEqual((await opened.state.get('chat:durable')).policy, durable);
+    await assert.rejects(opened.state.setPolicy('chat:durable', temporary), /registerTransient/);
+    assert.deepEqual((await opened.state.get('chat:durable')).policy, durable);
+  } finally { await opened.state.close(); }
+  const reopened = await open(directory);
+  try {
+    assert.equal(await reopened.state.read('chat:private'), null); assert.equal(await reopened.state.read('chat:missing'), null);
+    assert.ok(await reopened.state.read('chat:durable'));
+    assert.equal((await reopened.driver.read(snapshot => snapshot.all("SELECT key FROM sessions WHERE key IN ('chat:private','chat:missing')"))).length, 0);
+  } finally { await reopened.state.close(); }
+}));

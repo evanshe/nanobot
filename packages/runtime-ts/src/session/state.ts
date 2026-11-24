@@ -114,7 +114,12 @@ export class SessionState {
   }
   setPolicy(key: string, policy: SessionPolicy, signal?: AbortSignal): Promise<void> {
     const frozen = structuredClone(policy);
-    return this.#submit([key], async () => { this.#policies.set(key, frozen); const snapshot = this.#snapshots.get(key); if (snapshot) snapshot.policy = frozen; }, { signal });
+    return this.#submit([key], async () => {
+      if (!frozen.persist) throw new Error('use registerTransient for non-persistent sessions');
+      const current = await this.#repository.driver.read(snapshot => this.#load(snapshot, key));
+      if (!current || !current.persisted || !current.policy.persist) throw new Error('policy requires an existing durable session');
+      this.#policies.set(key, frozen); current.policy = frozen; this.#publish(current);
+    }, { signal });
   }
   registerTransient(value: SessionRecord, policy: SessionPolicy, signal?: AbortSignal): Promise<SessionRecord> {
     const frozen = structuredClone(value); frozen.policy = structuredClone(policy); frozen.persisted = false;
