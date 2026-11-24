@@ -56,14 +56,15 @@ export class AgentLoop {
   readonly #tickets = new Map<string, { id: string; fingerprint: string }>(); readonly #activeResume = new Map<string, AbortController>();
   readonly #jobs = new Map<string, Set<{ controller: AbortController; task: Promise<unknown> }>>(); readonly #controlling = new Set<string>(); #closed = false;
   constructor(options: AgentLoopOptions) { this.#options = { ...options }; this.#publisher = new RuntimeEventPublisher(options.bus); }
-  #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  #serial<T>(key: string, operation: (controller: AbortController) => Promise<T>, signal?: AbortSignal, accept?: () => Promise<unknown>): Promise<T> {
     if (this.#closed) return Promise.reject(new Error('Agent loop is closed'));
     if (this.#controlling.has(key)) return Promise.reject(new RuntimeBusyError('Session control is active'));
     if (signal?.aborted) return Promise.reject(signal.reason);
     const release = this.#options.bus.admission.activity(), previous = this.#tails.get(key) ?? Promise.resolve(), controller = new AbortController();
     const abort = () => controller.abort(signal!.reason); signal?.addEventListener('abort', abort, { once: true });
     const jobs = this.#jobs.get(key) ?? new Set<{ controller: AbortController; task: Promise<unknown> }>(); this.#jobs.set(key, jobs);
-    const task = previous.catch(() => {}).then(() => { controller.signal.throwIfAborted(); return operation(controller); }).finally(() => {
+    const accepted = accept ? Promise.resolve().then(accept) : Promise.resolve(); void accepted.catch(() => {});
+    const task = previous.catch(() => {}).then(async () => { await accepted; controller.signal.throwIfAborted(); return operation(controller); }).finally(() => {
       signal?.removeEventListener('abort', abort); release(); this.#pending.delete(task); jobs.delete(job); if (!jobs.size) this.#jobs.delete(key); if (this.#tails.get(key) === task) this.#tails.delete(key);
     });
     const job = { controller, task }; jobs.add(job); this.#tails.set(key, task); this.#pending.add(task); void task.catch(() => {}); return task;
@@ -157,7 +158,7 @@ export class AgentLoop {
   processMessage(input: InboundMessage, options: DirectTurnOptions = {}): Promise<OutboundMessage<AgentRuntime> | null> {
     const message = cloneRecoveryInbound(input), captured = { ...options }, key = message.sessionKey;
     this.#activeResume.get(key)?.abort(new AgentLoopCancellation('Recovery superseded by new input', false));
-    return this.#serial(key, controller => this.#turn(message, { ...captured, signal: controller.signal }), options.signal);
+    return this.#serial(key, controller => this.#turn(message, { ...captured, signal: controller.signal }), options.signal, options.ephemeral ? undefined : async () => { const id = await this.#options.state.queueFollowup(key, message); if (id) message.metadata._recovery_followup_id = id; });
   }
   async #turn(message: InboundMessage, options: DirectTurnOptions & { resume?: boolean }): Promise<OutboundMessage<AgentRuntime> | null> {
     const { state, bus, context, dataDirectory } = this.#options, key = message.sessionKey, turnId = randomUUID().replaceAll('-', ''), started = performance.now(), signal = options.signal ?? new AbortController().signal;
@@ -186,6 +187,7 @@ export class AgentLoop {
       const transcript = await context.buildTranscript({ history, currentMessage: message.content, currentRole: message.isUserInput ? 'user' : 'system', media: message.media, runtimeContextBlocks: blocks, inputMetadata: options.resume ? undefined : inputMetadata(message), sessionSummary: object(draft.metadata._last_summary) && typeof draft.metadata._last_summary.text === 'string' ? { text: draft.metadata._last_summary.text, last_active: typeof draft.metadata._last_summary.last_active === 'string' ? draft.metadata._last_summary.last_active : draft.updatedAt } : null }, contextOptions);
       signal.throwIfAborted();
       const current = transcript.at(-1)!, early = !options.resume && Boolean(message.content.trim() || message.media.length || blocks.length);
+      if (typeof message.metadata._recovery_followup_id === 'string') current._recovery_followup_id = message.metadata._recovery_followup_id;
       if (options.resume) { current._hidden_history = { kind: 'internal_continuation' }; draft.metadata.pending_user_turn = true; }
       if (early) { await persistAgentMessages(draft, [current], { dataDirectory }); draft.metadata.pending_user_turn = true; }
       if (!options.resume) draft.metadata.request_origin = { message_id: typeof message.metadata.message_id === 'string' ? message.metadata.message_id : null, turn_id: turnId };

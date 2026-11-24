@@ -205,3 +205,25 @@ test('closing the loop wakes an empty bus intake and waits for accepted cancella
   try { const running = runtime.loop.run(); await runtime.loop.close(); await running; assert.equal(runtime.bus.inboundSize, 0); }
   finally { await runtime.loop.close(); await runtime.store.close(); }
 }));
+test('accepted websocket inputs are journaled while queued and remain recoverable after shutdown', async () => isolated(async (directory, agent, builtin) => {
+  let entered!: () => void; const reached = new Promise<void>(resolve => { entered = resolve; });
+  const runtime = await create(directory, agent, builtin, { chatStream: async (_request, _callbacks, signal) => { entered(); await new Promise<never>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })); throw new Error('unreachable'); } });
+  try {
+    const first = runtime.loop.processDirect('first', { channel: 'websocket', sessionKey: 'websocket:journal' }); const firstRejected = assert.rejects(first, /shutdown/); await reached;
+    const second = runtime.loop.processDirect('queued', { channel: 'websocket', sessionKey: 'websocket:journal' }); const secondRejected = assert.rejects(second, /shutdown/);
+    // Queue the read after the synchronously accepted journal admission microtask.
+    await new Promise(resolve => setImmediate(resolve)); const queued = await runtime.store.state.get('websocket:journal');
+    assert.equal((queued.metadata.pending_user_followups as ConfigObject[]).length, 1); assert.match(JSON.stringify(queued.metadata.pending_user_followups), /queued/);
+    await runtime.loop.close(); await Promise.all([firstRejected, secondRejected]); await runtime.store.close();
+    const reopened = await openSessionStore({ workspace: agent, sessionsRoot: join(directory, 'node-sessions') });
+    try { const saved = await reopened.state.get(queued.key); assert.match(JSON.stringify(saved.metadata.pending_user_followups), /queued/); assert.equal(saved.messages.filter(row => row.content === 'first').length, 1); assert.equal(saved.messages.filter(row => row.content === 'queued').length, 0); } finally { await reopened.close(); }
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
+test('successful queued websocket inputs acknowledge journal ids only when their input is committed', async () => isolated(async (directory, agent, builtin) => {
+  const runtime = await create(directory, agent, builtin, { chatStream: async () => frame('answer') });
+  try {
+    await Promise.all(['first', 'second'].map(content => runtime.loop.processDirect(content, { channel: 'websocket', sessionKey: 'websocket:journal' })));
+    const saved = await runtime.store.state.get('websocket:journal'); assert.equal(saved.metadata.pending_user_followups, undefined); assert.equal(saved.metadata.pending_user_turn, undefined);
+    assert.deepEqual(saved.messages.filter(row => row.role === 'user').map(row => row.content), ['first', 'second']);
+  } finally { await runtime.loop.close(); await runtime.store.close(); }
+}));
